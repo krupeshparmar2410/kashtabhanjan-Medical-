@@ -27,11 +27,21 @@ const UserSchema = new mongoose.Schema({
     enum: ['admin', 'staff'],
     default: 'staff'
   },
+  failedLoginAttempts: {
+    type: Number,
+    default: 0
+  },
+  lockUntil: {
+    type: Date,
+    default: null
+  },
   createdAt: {
     type: Date,
     default: Date.now
   }
 });
+
+UserSchema.index({ role: 1 });
 
 // Encrypt password using bcrypt
 UserSchema.pre('save', async function (next) {

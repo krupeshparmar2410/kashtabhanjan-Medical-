@@ -1,0 +1,237 @@
+/* AddPurchase page styles */
+.add-purchase-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  animation: fadeIn 0.4s ease-out;
+}
+
+.purchase-header-section {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+}
+
+.purchase-header-section h2 {
+  font-size: 24px;
+  font-weight: 800;
+  color: var(--text-primary);
+}
+
+.add-purchase-card {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-lg);
+  box-shadow: var(--shadow-sm);
+  padding: 24px;
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+}
+
+.form-grid-4 {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+  gap: 16px;
+}
+
+.purchase-form-group {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.purchase-form-group label {
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  text-transform: uppercase;
+}
+
+.purchase-form-group input, 
+.purchase-form-group select, 
+.purchase-form-group textarea {
+  height: 42px;
+  border-radius: var(--border-radius-sm);
+  border: 1px solid var(--border-color);
+  padding: 0 12px;
+  font-size: 14px;
+  color: var(--text-primary);
+  background-color: #ffffff;
+  outline: none;
+  transition: border-color var(--transition-fast);
+}
+
+.purchase-form-group textarea {
+  height: 80px;
+  padding: 10px 12px;
+  resize: vertical;
+}
+
+.purchase-form-group input:focus, 
+.purchase-form-group select:focus, 
+.purchase-form-group textarea:focus {
+  border-color: var(--primary-color);
+}
+
+.purchase-form-group input:disabled {
+  background-color: #F1F5F9;
+  color: #64748B;
+  cursor: not-allowed;
+}
+
+/* Medicine table styles */
+.items-table-section {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  border-top: 1px solid var(--border-color);
+  padding-top: 24px;
+}
+
+.items-table-section h3 {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--text-primary);
+}
+
+.items-table-wrapper {
+  overflow-x: auto;
+}
+
+.items-table {
+  width: 100%;
+  border-collapse: collapse;
+  text-align: left;
+}
+
+.items-table th {
+  background-color: #F8FAFC;
+  padding: 12px 8px;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text-secondary);
+  border-bottom: 1px solid var(--border-color);
+  text-transform: uppercase;
+}
+
+.items-table td {
+  padding: 8px;
+  border-bottom: 1px solid var(--border-color);
+  vertical-align: middle;
+}
+
+.items-table input, .items-table select {
+  height: 38px;
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-sm);
+  padding: 0 8px;
+  font-size: 13px;
+  color: var(--text-primary);
+  outline: none;
+  width: 100%;
+}
+
+.items-table input:focus, .items-table select:focus {
+  border-color: var(--primary-color);
+}
+
+.btn-remove-row {
+  background: none;
+  border: none;
+  color: var(--error-color);
+  cursor: pointer;
+  padding: 6px;
+  border-radius: 6px;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all var(--transition-fast);
+}
+
+.btn-remove-row:hover {
+  background-color: var(--error-bg);
+}
+
+.btn-add-row {
+  align-self: flex-start;
+  background-color: var(--bg-color);
+  color: var(--primary-color);
+  border: 1px dashed var(--primary-color);
+  padding: 8px 16px;
+  border-radius: var(--border-radius-sm);
+  font-weight: 600;
+  font-size: 13px;
+  cursor: pointer;
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  transition: all var(--transition-fast);
+  margin-top: 8px;
+}
+
+.btn-add-row:hover {
+  background-color: rgba(25, 118, 210, 0.05);
+}
+
+/* Totals workspace panel */
+.purchase-footer-workspace {
+  display: grid;
+  grid-template-columns: 2fr 1fr;
+  gap: 30px;
+  border-top: 1px solid var(--border-color);
+  padding-top: 24px;
+  margin-top: 10px;
+}
+
+@media (max-width: 768px) {
+  .purchase-footer-workspace {
+    grid-template-columns: 1fr;
+  }
+}
+
+.additional-info-card {
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+}
+
+.totals-summary-card {
+  background-color: #F8FAFC;
+  border-radius: var(--border-radius-md);
+  padding: 20px;
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+}
+
+.total-row {
+  display: flex;
+  justify-content: space-between;
+  font-size: 14px;
+  color: var(--text-secondary);
+}
+
+.total-row.grand-total {
+  font-size: 18px;
+  font-weight: 800;
+  color: var(--text-primary);
+  border-top: 1px solid var(--border-color);
+  padding-top: 12px;
+  margin-top: 4px;
+}
+
+.total-row.outstanding {
+  font-size: 16px;
+  font-weight: 700;
+  color: var(--error-color);
+  border-top: 1px dashed var(--border-color);
+  padding-top: 12px;
+}
+
+/* Form Actions */
+.form-actions-bar {
+  display: flex;
+  justify-content: flex-end;
+  gap: 12px;
+}

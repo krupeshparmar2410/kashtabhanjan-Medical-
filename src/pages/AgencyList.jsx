@@ -115,6 +115,21 @@ const AgencyList = () => {
     fetchStats();
   }, []);
 
+  // Export handler
+  const handleExport = (format) => {
+    const token = localStorage.getItem('token');
+    const params = new URLSearchParams({
+      search,
+      status: statusFilter,
+      category: categoryFilter,
+      type: typeFilter,
+      blocked: blockedFilter,
+      sort: sortBy
+    }).toString();
+    
+    window.open(`/api/agencies/export/${format}?${params}&Authorization=Bearer ${token}`, '_blank');
+  };
+
   // Handle deletion execution
   const handleDeleteConfirm = async () => {
     if (!agencyToDelete) return;
@@ -200,9 +215,17 @@ const AgencyList = () => {
       <div className="agency-controls-panel">
         <div className="controls-top">
           <h3>Manage Medicine Suppliers</h3>
-          <button className="add-agency-btn" onClick={() => navigate('/agencies/add')}>
-            <FaPlus /> Add New Agency
-          </button>
+          <div style={{ display: 'flex', gap: '10px', flexWrap: 'wrap' }}>
+            <button className="page-btn" style={{ color: '#1d4ed8', border: '1px solid #bfdbfe', display: 'flex', alignItems: 'center', gap: '6px' }} onClick={() => handleExport('excel')}>
+              Export Excel
+            </button>
+            <button className="page-btn" style={{ color: '#b91c1c', border: '1px solid #fecaca', display: 'flex', alignItems: 'center', gap: '6px' }} onClick={() => handleExport('pdf')}>
+              Export PDF
+            </button>
+            <button className="add-agency-btn" onClick={() => navigate('/agencies/add')}>
+              <FaPlus /> Add New Agency
+            </button>
+          </div>
         </div>
 
         <div className="filters-row">

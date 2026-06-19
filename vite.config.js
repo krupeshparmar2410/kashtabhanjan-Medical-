@@ -10,7 +10,18 @@ export default defineConfig({
       '/api': {
         target: 'http://localhost:5000',
         changeOrigin: true,
-        secure: false
+        secure: false,
+        configure: (proxy, _options) => {
+          proxy.on('error', (err, _req, res) => {
+            res.writeHead(502, {
+              'Content-Type': 'application/json',
+            });
+            res.end(JSON.stringify({
+              success: false,
+              message: 'Backend unavailable'
+            }));
+          });
+        }
       }
     }
   }

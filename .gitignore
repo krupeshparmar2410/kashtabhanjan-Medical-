@@ -10,6 +10,10 @@ build/
 .env
 backend/.env
 
+# User data and backups
+storage/
+uploads/
+
 # Log files
 *.log
 npm-debug.log*

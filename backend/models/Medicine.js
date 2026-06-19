@@ -1,5 +1,16 @@
 const mongoose = require('mongoose');
 
+// Add custom casting to support legacy database strings ('Yes' / 'No') on Boolean fields
+const defaultBooleanCaster = mongoose.Schema.Types.Boolean.cast();
+mongoose.Schema.Types.Boolean.cast(v => {
+  if (typeof v === 'string') {
+    const val = v.toLowerCase();
+    if (val === 'yes' || val === 'true' || val === '1') return true;
+    if (val === 'no' || val === 'false' || val === '0') return false;
+  }
+  return defaultBooleanCaster(v);
+});
+
 const MedicineSchema = new mongoose.Schema(
   {
     medicineCode: {
@@ -110,12 +121,25 @@ const MedicineSchema = new mongoose.Schema(
       min: [1, 'Pack size must be at least 1']
     },
     prescriptionRequired: {
+      type: Boolean,
+      default: false
+    },
+    scheduleCategory: {
       type: String,
-      enum: {
-        values: ['Yes', 'No'],
-        message: 'Prescription required status must be Yes or No'
-      },
-      default: 'No'
+      enum: ['Normal', 'H', 'H1', 'X'],
+      default: 'Normal'
+    },
+    scheduleH: {
+      type: Boolean,
+      default: false
+    },
+    scheduleH1: {
+      type: Boolean,
+      default: false
+    },
+    scheduleX: {
+      type: Boolean,
+      default: false
     },
     storageType: {
       type: String,
@@ -187,7 +211,9 @@ const MedicineSchema = new mongoose.Schema(
     }
   },
   {
-    timestamps: true
+    timestamps: true,
+    toJSON: { getters: true },
+    toObject: { getters: true }
   }
 );
 

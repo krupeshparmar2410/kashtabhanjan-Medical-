@@ -8,8 +8,8 @@ const {
   updateAgency,
   deleteAgency,
   getAgencyActivities,
-  exportExcelPlaceholder,
-  exportPdfPlaceholder
+  exportAgenciesExcel,
+  exportAgenciesPdf
 } = require('../controllers/agencyController');
 const { protect } = require('../middleware/authMiddleware');
 
@@ -17,8 +17,8 @@ const { protect } = require('../middleware/authMiddleware');
 router.use(protect);
 
 router.get('/stats', getAgencyStats);
-router.get('/export/excel', exportExcelPlaceholder);
-router.get('/export/pdf', exportPdfPlaceholder);
+router.get('/export/excel', exportAgenciesExcel);
+router.get('/export/pdf', exportAgenciesPdf);
 
 router.route('/')
   .get(getAgencies)

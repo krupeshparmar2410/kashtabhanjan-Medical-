@@ -1,0 +1,43 @@
+const express = require('express');
+const router = express.Router();
+const {
+  createCustomer,
+  getCustomers,
+  searchCustomers,
+  getCustomerById,
+  updateCustomer,
+  deleteCustomer,
+  restoreCustomer,
+  getCustomerLedger,
+  getCustomerLoyaltyLedger,
+  createCustomerPayment,
+  getCustomerPayments,
+  getCustomerAnalytics
+} = require('../controllers/customerController');
+const { protect } = require('../middleware/authMiddleware');
+const { checkPermission } = require('../middleware/PermissionMiddleware');
+
+// Protect all routes
+router.use(protect);
+
+router.get('/search', searchCustomers);
+
+router.route('/')
+  .get(getCustomers)
+  .post(createCustomer);
+
+router.route('/:id')
+  .get(getCustomerById)
+  .put(checkPermission('edit_customer'), updateCustomer)
+  .delete(deleteCustomer);
+
+router.post('/:id/restore', restoreCustomer);
+router.get('/:id/ledger', getCustomerLedger);
+router.get('/:id/loyalty', getCustomerLoyaltyLedger);
+router.get('/:id/analytics', getCustomerAnalytics);
+
+router.route('/:id/payments')
+  .get(getCustomerPayments)
+  .post(createCustomerPayment);
+
+module.exports = router;

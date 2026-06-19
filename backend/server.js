@@ -1,10 +1,28 @@
 const express = require('express');
+const path = require('path');
+const fs = require('fs');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const logger = require('./config/logger');
 const connectDB = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
 const agencyRoutes = require('./routes/agencyRoutes');
 const medicineRoutes = require('./routes/medicineRoutes');
+const purchaseRoutes = require('./routes/purchaseRoutes');
+const inventoryRoutes = require('./routes/inventoryRoutes');
+const customerRoutes = require('./routes/customerRoutes');
+const saleRoutes = require('./routes/saleRoutes');
+const settingsRoutes = require('./routes/settingsRoutes');
+const prescriptionRoutes = require('./routes/prescriptionRoutes');
+const reminderRoutes = require('./routes/reminderRoutes');
+const complianceRoutes = require('./routes/complianceRoutes');
+const auditRoutes = require('./routes/auditRoutes');
+const backupRoutes = require('./routes/backupRoutes');
+const requestLogger = require('./middleware/RequestLoggerMiddleware');
+const { globalErrorHandler } = require('./middleware/ErrorHandler');
+const { initializeSettings } = require('./config/SettingsService');
+const { runMigrations } = require('./config/MigrationService');
+const { startBackgroundJobs } = require('./config/SchedulerService');
 const User = require('./models/User');
 const Agency = require('./models/Agency');
 const Medicine = require('./models/Medicine');
@@ -12,35 +30,63 @@ const Medicine = require('./models/Medicine');
 // Load environment variables
 dotenv.config();
 
-// Connect to Database
-connectDB();
+// Validate critical variables
+const { validateEnvironment } = require('./config/EnvironmentValidationService');
+validateEnvironment();
 
 const app = express();
 
 // Middleware
-app.use(cors());
+if (process.env.NODE_ENV !== 'production') {
+  app.use(cors());
+}
 app.use(express.json());
+app.use(requestLogger);
+app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+
+// Mount Swagger UI documentation
+const swaggerUi = require('swagger-ui-express');
+const swaggerDocument = require('./config/swagger.json');
+app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // Routes
 app.use('/api/auth', authRoutes);
 app.use('/api/agencies', agencyRoutes);
 app.use('/api/medicines', medicineRoutes);
+app.use('/api/purchases', purchaseRoutes);
+app.use('/api/inventory', inventoryRoutes);
+app.use('/api/customers', customerRoutes);
+app.use('/api/sales', saleRoutes);
+app.use('/api/settings', settingsRoutes);
+app.use('/api/prescriptions', prescriptionRoutes);
+app.use('/api/reminders', reminderRoutes);
+app.use('/api/compliance', complianceRoutes);
+app.use('/api/audits', auditRoutes);
+app.use('/api/backups', backupRoutes);
+
+// Global Error Handler for API Routes
+app.use(globalErrorHandler);
 
 // Serve frontend static assets (React app) on the same port
-const path = require('path');
-const fs = require('fs');
-const distPath = path.join(__dirname, '../dist');
+const distPath = fs.existsSync(path.join(__dirname, "../frontend/dist"))
+  ? path.join(__dirname, "../frontend/dist")
+  : path.join(__dirname, "../dist");
 
-if (fs.existsSync(distPath)) {
-  app.use(express.static(distPath));
-  app.get('*', (req, res) => {
-    res.sendFile(path.join(distPath, 'index.html'));
-  });
-} else {
-  app.get('/', (req, res) => {
-    res.send('Kashtbhanjan Medical Shop Management System API is running... (Run "npm run build" in the project root folder to serve the frontend on this port)');
-  });
-}
+app.use(express.static(distPath));
+
+app.get("*", (req, res) => {
+  if (req.path.startsWith("/api")) {
+    return res.status(404).json({
+      success: false,
+      message: "API route not found"
+    });
+  }
+  if (fs.existsSync(path.join(distPath, "index.html"))) {
+    res.sendFile(path.join(distPath, "index.html"));
+  } else {
+    res.send('Kashtbhanjan Medical Shop Management System API is running... (Run "npm run build" to serve the frontend on this port)');
+  }
+});
 
 // Seed Initial Admin and Staff Users if they don't exist
 const seedUsers = async () => {
@@ -1214,13 +1260,300 @@ const seedMedicines = async () => {
   }
 };
 
-// Start Server
-const PORT = process.env.PORT || 5000;
+// Seed Initial Purchases, Batches, Payments, Ledger, and Snapshots if they don't exist
+const seedPurchases = async () => {
+  try {
+    const Purchase = require('./models/Purchase');
+    const PurchaseItem = require('./models/PurchaseItem');
+    const InventoryBatch = require('./models/InventoryBatch');
+    const InventoryActivity = require('./models/InventoryActivity');
+    const SupplierPayment = require('./models/SupplierPayment');
+    const AgencyLedger = require('./models/AgencyLedger');
+    const InventorySnapshot = require('./models/InventorySnapshot');
+    
+    const count = await Purchase.countDocuments();
+    if (count > 0) return;
 
-app.listen(PORT, async () => {
-  console.log(`Server running in ${process.env.NODE_ENV} mode on port ${PORT}`);
-  // Seed database
-  await seedUsers();
-  await seedAgencies();
-  await seedMedicines();
-});
+    console.log('No purchases found. Seeding 15 dummy purchases, batches, payments, ledger, and snapshots...');
+    
+    const adminUser = await User.findOne({ role: 'admin' });
+    const creatorId = adminUser ? adminUser._id : null;
+    const agencies = await Agency.find({ isDeleted: false });
+    const medicines = await Medicine.find({ isDeleted: false });
+    
+    if (agencies.length === 0 || medicines.length === 0 || !creatorId) {
+      console.error('Cannot seed purchases: Missing dependencies');
+      return;
+    }
+
+    // Let's create 15 purchases
+    for (let i = 1; i <= 15; i++) {
+      const isPosted = i <= 10; // 1 to 10 are Posted, 11 to 15 are Drafts
+      const agencyIndex = (i - 1) % agencies.length;
+      const agency = agencies[agencyIndex];
+      
+      const purchaseNumber = `PUR${String(i).padStart(6, '0')}`;
+      const invoiceNumber = `INV-${20260600 + i}`;
+      const purchaseDate = new Date();
+      // stagger dates back in time
+      purchaseDate.setDate(purchaseDate.getDate() - (15 - i));
+      
+      const creditDays = agency.creditDays || 30;
+      const dueDate = new Date(purchaseDate.getTime() + creditDays * 24 * 60 * 60 * 1000);
+      
+      // select 2 medicines
+      const med1 = medicines[(i * 2) % medicines.length];
+      const med2 = medicines[(i * 2 + 1) % medicines.length];
+      
+      // pricing
+      const qty1 = 50 + (i * 2);
+      const qty2 = 30 + (i * 3);
+      const free1 = i % 3 === 0 ? 5 : 0;
+      const free2 = 0;
+      
+      const item1Price = med1.purchasePrice || 10;
+      const item2Price = med2.purchasePrice || 20;
+      
+      const subTotal1 = qty1 * item1Price;
+      const subTotal2 = qty2 * item2Price;
+      const billAmount = subTotal1 + subTotal2;
+      
+      const gstRate1 = med1.gstPercentage || 12;
+      const gstRate2 = med2.gstPercentage || 12;
+      const gst1 = subTotal1 * (gstRate1 / 100);
+      const gst2 = subTotal2 * (gstRate2 / 100);
+      const gstAmount = gst1 + gst2;
+      
+      const grandTotal = billAmount + gstAmount;
+      const paidAmount = isPosted ? (i % 2 === 0 ? Math.round(grandTotal / 2) : 0) : 0;
+      const pendingAmount = grandTotal - paidAmount;
+      
+      const purchase = await Purchase.create({
+        purchaseNumber,
+        invoiceNumber,
+        invoiceDate: purchaseDate,
+        purchaseDate,
+        agencyId: agency._id,
+        billAmount: Math.round(billAmount * 100) / 100,
+        gstAmount: Math.round(gstAmount * 100) / 100,
+        discountAmount: 0,
+        grandTotal: Math.round(grandTotal * 100) / 100,
+        paidAmount: Math.round(paidAmount * 100) / 100,
+        pendingAmount: Math.round(pendingAmount * 100) / 100,
+        dueDate,
+        creditDays,
+        paymentMethod: i % 2 === 0 ? 'Bank Transfer' : 'Credit',
+        purchaseStatus: isPosted ? 'Posted' : 'Draft',
+        remarks: `Seeded purchase record ${i}`,
+        createdBy: creatorId
+      });
+
+      const pItem1 = await PurchaseItem.create({
+        purchaseId: purchase._id,
+        medicineId: med1._id,
+        batchNumber: `BAT-${20260600 + i}-A`,
+        manufacturingDate: new Date(purchaseDate.getTime() - 90 * 24 * 60 * 60 * 1000),
+        expiryDate: new Date(purchaseDate.getTime() + (i <= 3 ? 15 : 365) * 24 * 60 * 60 * 1000), // Expiry within 15 days for first few batches to test alerts
+        quantity: qty1,
+        freeQuantity: free1,
+        purchasePrice: item1Price,
+        sellingPrice: med1.sellingPrice || item1Price * 1.2,
+        mrp: med1.mrp || item1Price * 1.3,
+        gstPercentage: gstRate1,
+        discountPercentage: 0,
+        lineTotal: subTotal1 + gst1
+      });
+
+      const pItem2 = await PurchaseItem.create({
+        purchaseId: purchase._id,
+        medicineId: med2._id,
+        batchNumber: `BAT-${20260600 + i}-B`,
+        manufacturingDate: new Date(purchaseDate.getTime() - 90 * 24 * 60 * 60 * 1000),
+        expiryDate: new Date(purchaseDate.getTime() + (i <= 5 && i > 3 ? 60 : 365) * 24 * 60 * 60 * 1000), // Near Expiry for some
+        quantity: qty2,
+        freeQuantity: free2,
+        purchasePrice: item2Price,
+        sellingPrice: med2.sellingPrice || item2Price * 1.2,
+        mrp: med2.mrp || item2Price * 1.3,
+        gstPercentage: gstRate2,
+        discountPercentage: 0,
+        lineTotal: subTotal2 + gst2
+      });
+
+      if (isPosted) {
+        // Create Batches
+        const processItem = async (pItem, medObj) => {
+          const totalQty = pItem.quantity + pItem.freeQuantity;
+          
+          // Determine status
+          const today = new Date();
+          const expiryDate = new Date(pItem.expiryDate);
+          let status = 'Active';
+          if (expiryDate <= today) status = 'Expired';
+          else if ((expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24) <= 90) status = 'Near Expiry';
+
+          const batch = await InventoryBatch.create({
+            batchCode: `BAT${String(Math.random()).slice(2, 8)}`,
+            medicineId: pItem.medicineId,
+            purchaseItemId: pItem._id,
+            batchNumber: pItem.batchNumber,
+            manufacturingDate: pItem.manufacturingDate,
+            expiryDate: pItem.expiryDate,
+            originalQuantity: totalQty,
+            availableQuantity: totalQty,
+            reservedQuantity: 0,
+            purchasePrice: pItem.purchasePrice,
+            sellingPrice: pItem.sellingPrice,
+            mrp: pItem.mrp,
+            status,
+            isLocked: false,
+            isSaleBlocked: status === 'Expired',
+            createdBy: creatorId
+          });
+
+          // update medicine stock
+          medObj.currentStock = (medObj.currentStock || 0) + totalQty;
+          await medObj.save();
+
+          // Activity
+          await InventoryActivity.create({
+            inventoryBatchId: batch._id,
+            action: 'Purchase Receipt',
+            description: `Seeded receipt of ${totalQty} units via Purchase ${purchaseNumber}`,
+            performedBy: creatorId
+          });
+        };
+
+        await processItem(pItem1, med1);
+        await processItem(pItem2, med2);
+
+        // Update agency balance and ledger
+        agency.currentBalance = (agency.currentBalance || 0) + purchase.grandTotal;
+        agency.lastPurchaseDate = purchaseDate;
+        await agency.save();
+
+        await AgencyLedger.create({
+          agencyId: agency._id,
+          transactionType: 'Purchase',
+          referenceId: purchase._id,
+          referenceNumber: purchaseNumber,
+          debit: 0,
+          credit: purchase.grandTotal,
+          runningBalance: agency.currentBalance,
+          remarks: `Seeded purchase credit for ${purchaseNumber}`
+        });
+      }
+    }
+
+    // Seed 10 payments to suppliers
+    for (let p = 1; p <= 10; p++) {
+      const agency = agencies[p % agencies.length];
+      const amountPaid = 2000 + (p * 500);
+      
+      const paymentNumber = `PAY${String(p).padStart(6, '0')}`;
+      const paymentDate = new Date();
+      paymentDate.setDate(paymentDate.getDate() - (10 - p));
+
+      const payment = await SupplierPayment.create({
+        paymentNumber,
+        agencyId: agency._id,
+        paymentDate,
+        amountPaid,
+        paymentMethod: p % 2 === 0 ? 'Bank Transfer' : 'Cash',
+        referenceNumber: `TXN${100000 + p}`,
+        remarks: `Seeded supplier payment ${p}`,
+        createdBy: creatorId
+      });
+
+      // Update agency balance and ledger
+      agency.currentBalance = Math.max(0, (agency.currentBalance || 0) - amountPaid);
+      await agency.save();
+
+      await AgencyLedger.create({
+        agencyId: agency._id,
+        transactionType: 'Payment',
+        referenceId: payment._id,
+        referenceNumber: paymentNumber,
+        debit: amountPaid,
+        credit: 0,
+        runningBalance: agency.currentBalance,
+        remarks: `Seeded supplier payment debit for ${paymentNumber}`
+      });
+
+      // update purchase pendingAmount
+      let remaining = amountPaid;
+      const purchases = await Purchase.find({ agencyId: agency._id, purchaseStatus: 'Posted', pendingAmount: { $gt: 0 } }).sort({ purchaseDate: 1 });
+      for (const pur of purchases) {
+        if (remaining <= 0) break;
+        const deduct = Math.min(pur.pendingAmount, remaining);
+        pur.pendingAmount -= deduct;
+        pur.paidAmount += deduct;
+        await pur.save();
+        remaining -= deduct;
+      }
+    }
+
+    // Seed daily snapshots for last 5 days
+    for (let s = 5; s >= 1; s--) {
+      const snapDate = new Date();
+      snapDate.setDate(snapDate.getDate() - s);
+      snapDate.setHours(0, 0, 0, 0);
+
+      // get valuations on that day
+      const batches = await InventoryBatch.find({ isDeleted: false });
+      let itemsCount = batches.length;
+      let purchaseVal = 0;
+      let sellingVal = 0;
+      let mrpVal = 0;
+
+      batches.forEach(b => {
+        purchaseVal += b.availableQuantity * b.purchasePrice;
+        sellingVal += b.availableQuantity * b.sellingPrice;
+        mrpVal += b.availableQuantity * b.mrp;
+      });
+
+      // Stagger stats back in time for trend visualization
+      const factor = 1 - (s * 0.05); // slight variation
+
+      await InventorySnapshot.create({
+        snapshotDate: snapDate,
+        totalItems: Math.round(itemsCount * factor),
+        totalPurchaseValue: Math.round(purchaseVal * factor * 100) / 100,
+        totalSellingValue: Math.round(sellingVal * factor * 100) / 100,
+        totalMrpValue: Math.round(mrpVal * factor * 100) / 100,
+        createdBy: creatorId
+      });
+    }
+
+    console.log('Seeded purchase database successfully.');
+  } catch (error) {
+    console.error('Seeding purchases error:', error);
+  }
+};
+
+// Start Server
+const startServer = async () => {
+  await connectDB();
+
+  const PORT = process.env.PORT || 5000;
+  app.listen(PORT, async () => {
+    logger.info(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+    
+    // Run startup diagnostics health checks
+    const { runStartupHealthChecks } = require('./config/StartupHealthValidationService');
+    await runStartupHealthChecks();
+
+    // Seed database
+    await seedUsers();
+    await seedAgencies();
+    await seedMedicines();
+    await seedPurchases();
+
+    // Initialize and run Phase 5 components
+    await initializeSettings();
+    await runMigrations();
+    startBackgroundJobs();
+  });
+};
+
+startServer();

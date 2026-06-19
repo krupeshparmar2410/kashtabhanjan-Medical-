@@ -10,6 +10,22 @@ import MedicineList from './pages/MedicineList';
 import AddMedicine from './pages/AddMedicine';
 import EditMedicine from './pages/EditMedicine';
 import MedicineDetails from './pages/MedicineDetails';
+import PurchaseList from './pages/PurchaseList';
+import AddPurchase from './pages/AddPurchase';
+import PurchaseDetails from './pages/PurchaseDetails';
+import InventoryDashboard from './pages/InventoryDashboard';
+import Billing from './pages/Billing';
+import CustomersList from './pages/CustomersList';
+import CustomerDetails from './pages/CustomerDetails';
+import CreditAccounts from './pages/CreditAccounts';
+import Reports from './pages/Reports';
+import Recalls from './pages/Recalls';
+import CashClosingPage from './pages/CashClosingPage';
+import SettingsPage from './pages/SettingsPage';
+import AuditLogsPage from './pages/AuditLogsPage';
+import DatabaseMaintenance from './pages/DatabaseMaintenance';
+import PrescriptionsAdmin from './pages/PrescriptionsAdmin';
+import RemindersAdmin from './pages/RemindersAdmin';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import { authAPI } from './services/api';
@@ -28,6 +44,10 @@ import './styles/MedicineList.css';
 import './styles/AddMedicine.css';
 import './styles/EditMedicine.css';
 import './styles/MedicineDetails.css';
+import './styles/PurchaseList.css';
+import './styles/AddPurchase.css';
+import './styles/PurchaseDetails.css';
+import './styles/InventoryDashboard.css';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -189,20 +209,205 @@ function App() {
           }
         />
 
-        {/* Placeholder Routes */}
-        {['purchases', 'inventory', 'billing', 'customers', 'credit', 'reports', 'settings'].map((item) => (
-          <Route
-            key={item}
-            path={`/${item}`}
-            element={
-              <ProtectedRoute>
-                <Layout user={user} handleLogout={handleLogout}>
-                  <Dashboard activeItem={item} />
-                </Layout>
-              </ProtectedRoute>
-            }
-          />
-        ))}
+        {/* Purchases Routes */}
+        <Route
+          path="/purchases"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <PurchaseList />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/purchases/add"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <AddPurchase />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/purchases/edit/:id"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <AddPurchase />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/purchases/:id"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <PurchaseDetails />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Inventory Routes */}
+        <Route
+          path="/inventory"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <InventoryDashboard />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Billing Point of Sale */}
+        <Route
+          path="/billing"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <Billing />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Customer Directory */}
+        <Route
+          path="/customers"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <CustomersList />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        <Route
+          path="/customers/:id"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <CustomerDetails />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Prescriptions Admin */}
+        <Route
+          path="/prescriptions"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <PrescriptionsAdmin />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Reminders Board */}
+        <Route
+          path="/reminders"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <RemindersAdmin />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Credit Accounts Ledger */}
+        <Route
+          path="/credit"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <CreditAccounts />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Reports & BI Widgets */}
+        <Route
+          path="/reports"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <Reports />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Recalls and Blocked Stocks */}
+        <Route
+          path="/recalls"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <Recalls />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Counter Cash closing sessions */}
+        <Route
+          path="/cash-closing"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <CashClosingPage />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Settings Administration */}
+        <Route
+          path="/settings"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <SettingsPage />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Audit logging viewer */}
+        <Route
+          path="/audit-logs"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <AuditLogsPage />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Database Maintenance Dashboard */}
+        <Route
+          path="/maintenance"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <DatabaseMaintenance />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
 
         {/* Catch-all Redirect */}
         <Route path="*" element={<Navigate to="/" replace />} />

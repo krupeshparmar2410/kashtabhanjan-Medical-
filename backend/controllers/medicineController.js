@@ -61,10 +61,10 @@ const getMedicineStats = async (req, res) => {
             $sum: { $cond: [{ $eq: ['$status', 'Inactive'] }, 1, 0] }
           },
           prescriptionMedicines: {
-            $sum: { $cond: [{ $eq: ['$prescriptionRequired', 'Yes'] }, 1, 0] }
+            $sum: { $cond: [{ $eq: ['$prescriptionRequired', true] }, 1, 0] }
           },
           nonPrescriptionMedicines: {
-            $sum: { $cond: [{ $eq: ['$prescriptionRequired', 'No'] }, 1, 0] }
+            $sum: { $cond: [{ $eq: ['$prescriptionRequired', false] }, 1, 0] }
           },
           blockedMedicines: {
             $sum: { $cond: [{ $eq: ['$isBlocked', true] }, 1, 0] }
@@ -152,8 +152,8 @@ const getMedicines = async (req, res) => {
     }
 
     // Prescription filter
-    if (prescriptionRequired && ['Yes', 'No'].includes(prescriptionRequired)) {
-      query.prescriptionRequired = prescriptionRequired;
+    if (prescriptionRequired) {
+      query.prescriptionRequired = (prescriptionRequired === 'Yes' || prescriptionRequired === 'true');
     }
 
     // Blocked filter

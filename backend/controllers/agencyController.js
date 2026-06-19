@@ -373,24 +373,189 @@ const getAgencyActivities = async (req, res) => {
   }
 };
 
-// @desc    Export Excel placeholder
-// @route   GET /api/agencies/export/excel
-// @access  Private
-const exportExcelPlaceholder = (req, res) => {
-  res.json({
-    success: true,
-    message: 'Excel export placeholder. Ready for next phase integration.'
-  });
+// Helper to compile reports into CSV string
+const generateCSV = (headers, rows) => {
+  const headerLine = headers.join(',');
+  const rowLines = rows.map(row => 
+    row.map(val => {
+      if (val === null || val === undefined) return '';
+      const stringVal = String(val);
+      if (stringVal.includes(',') || stringVal.includes('"') || stringVal.includes('\n')) {
+        return `"${stringVal.replace(/"/g, '""')}"`;
+      }
+      return stringVal;
+    }).join(',')
+  );
+  return [headerLine, ...rowLines].join('\n');
 };
 
-// @desc    Export PDF placeholder
+// @desc    Export Excel (CSV)
+// @route   GET /api/agencies/export/excel
+// @access  Private
+const exportAgenciesExcel = async (req, res) => {
+  try {
+    const { 
+      search = '', 
+      status, 
+      category, 
+      type, 
+      blocked, 
+      sort = 'latest'
+    } = req.query;
+
+    const query = { isDeleted: false };
+
+    if (search) {
+      query.$or = [
+        { agencyName: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (status && ['active', 'inactive'].includes(status)) {
+      query.status = status;
+    }
+
+    if (category && ['Manufacturer', 'Wholesaler', 'Distributor', 'Local Supplier'].includes(category)) {
+      query.agencyCategory = category;
+    }
+
+    if (type === 'preferred') {
+      query.isPreferredSupplier = true;
+    } else if (type === 'normal') {
+      query.isPreferredSupplier = false;
+    }
+
+    if (blocked === 'true') {
+      query.isBlocked = true;
+    } else if (blocked === 'false') {
+      query.isBlocked = false;
+    }
+
+    let sortQuery = { createdAt: -1 };
+    if (sort === 'oldest') {
+      sortQuery = { createdAt: 1 };
+    } else if (sort === 'name_asc') {
+      sortQuery = { agencyName: 1 };
+    } else if (sort === 'name_desc') {
+      sortQuery = { agencyName: -1 };
+    } else if (sort === 'balance_desc') {
+      sortQuery = { currentBalance: -1 };
+    }
+
+    const agencies = await Agency.find(query).sort(sortQuery);
+
+    const headers = ['Agency Code', 'Agency Name', 'Contact Person', 'Designation', 'Phone', 'Email', 'GSTIN', 'Drug License', 'Address', 'City', 'State', 'Pincode', 'Category', 'Preferred', 'Blocked', 'Credit Days', 'Credit Limit', 'Current Balance', 'Status'];
+    const rows = agencies.map(a => [
+      a.agencyCode,
+      a.agencyName,
+      a.contactPerson || '',
+      a.contactPersonDesignation || '',
+      a.phone,
+      a.email || '',
+      a.gstNumber || '',
+      a.drugLicenseNumber || '',
+      a.address || '',
+      a.city || '',
+      a.state || '',
+      a.pincode || '',
+      a.agencyCategory,
+      a.isPreferredSupplier ? 'Yes' : 'No',
+      a.isBlocked ? 'Yes' : 'No',
+      a.creditDays || 0,
+      a.creditLimit || 0,
+      a.currentBalance || 0,
+      a.status
+    ]);
+
+    const csvContent = generateCSV(headers, rows);
+    res.setHeader('Content-Type', 'text/csv');
+    res.setHeader('Content-Disposition', `attachment; filename="Agencies_Report_${Date.now()}.csv"`);
+    return res.status(200).send(csvContent);
+  } catch (error) {
+    console.error('Error exporting agencies CSV:', error);
+    return res.status(500).json({ success: false, message: 'Server error exporting agencies to CSV' });
+  }
+};
+
+// @desc    Export PDF (Text layout)
 // @route   GET /api/agencies/export/pdf
 // @access  Private
-const exportPdfPlaceholder = (req, res) => {
-  res.json({
-    success: true,
-    message: 'PDF export placeholder. Ready for next phase integration.'
-  });
+const exportAgenciesPdf = async (req, res) => {
+  try {
+    const { 
+      search = '', 
+      status, 
+      category, 
+      type, 
+      blocked, 
+      sort = 'latest'
+    } = req.query;
+
+    const query = { isDeleted: false };
+
+    if (search) {
+      query.$or = [
+        { agencyName: { $regex: search, $options: 'i' } },
+        { phone: { $regex: search, $options: 'i' } }
+      ];
+    }
+
+    if (status && ['active', 'inactive'].includes(status)) {
+      query.status = status;
+    }
+
+    if (category && ['Manufacturer', 'Wholesaler', 'Distributor', 'Local Supplier'].includes(category)) {
+      query.agencyCategory = category;
+    }
+
+    if (type === 'preferred') {
+      query.isPreferredSupplier = true;
+    } else if (type === 'normal') {
+      query.isPreferredSupplier = false;
+    }
+
+    if (blocked === 'true') {
+      query.isBlocked = true;
+    } else if (blocked === 'false') {
+      query.isBlocked = false;
+    }
+
+    let sortQuery = { createdAt: -1 };
+    if (sort === 'oldest') {
+      sortQuery = { createdAt: 1 };
+    } else if (sort === 'name_asc') {
+      sortQuery = { agencyName: 1 };
+    } else if (sort === 'name_desc') {
+      sortQuery = { agencyName: -1 };
+    } else if (sort === 'balance_desc') {
+      sortQuery = { currentBalance: -1 };
+    }
+
+    const agencies = await Agency.find(query).sort(sortQuery);
+
+    const headers = ['Code', 'Agency Name', 'Contact Person', 'Phone', 'Limit', 'Balance', 'Category', 'Status'];
+    const rows = agencies.map(a => [
+      a.agencyCode,
+      a.agencyName,
+      a.contactPerson || '',
+      a.phone,
+      String(a.creditLimit || 0),
+      String(a.currentBalance || 0),
+      a.agencyCategory,
+      a.status
+    ]);
+
+    const csvContent = generateCSV(headers, rows);
+    const textReport = `==================================================\nKASHTBHANJAN PHARMACY - AGENCIES SUPPLIER REPORT\nGenerated At: ${new Date().toLocaleString()}\n==================================================\n\n` + csvContent;
+
+    res.setHeader('Content-Type', 'text/plain');
+    res.setHeader('Content-Disposition', `attachment; filename="Agencies_Report_${Date.now()}.txt"`);
+    return res.status(200).send(textReport);
+  } catch (error) {
+    console.error('Error exporting agencies PDF:', error);
+    return res.status(500).json({ success: false, message: 'Server error exporting agencies to PDF' });
+  }
 };
 
 module.exports = {
@@ -401,6 +566,6 @@ module.exports = {
   updateAgency,
   deleteAgency,
   getAgencyActivities,
-  exportExcelPlaceholder,
-  exportPdfPlaceholder
+  exportAgenciesExcel,
+  exportAgenciesPdf
 };
