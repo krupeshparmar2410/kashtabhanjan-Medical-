@@ -17,7 +17,8 @@ import {
   FaHistory,
   FaDatabase,
   FaFileMedical,
-  FaBell
+  FaBell,
+  FaUndo
 } from 'react-icons/fa';
 import { MdDashboard, MdLocalPharmacy } from 'react-icons/md';
 import { inventoryAPI } from '../services/api';
@@ -52,6 +53,7 @@ const Sidebar = ({ isOpen, onClose, handleLogout }) => {
     { id: 'purchases', name: 'Purchases', icon: <FaShoppingCart />, path: '/purchases' },
     { id: 'inventory', name: 'Inventory', icon: <FaBoxes />, path: '/inventory' },
     { id: 'billing', name: 'Billing', icon: <FaReceipt />, path: '/billing' },
+    { id: 'sales-returns', name: 'Sales Returns', icon: <FaUndo />, path: '/sales-returns' },
     { id: 'prescriptions', name: 'Prescriptions', icon: <FaFileMedical />, path: '/prescriptions' },
     { id: 'reminders', name: 'Refill Reminders', icon: <FaBell />, path: '/reminders' },
     { id: 'customers', name: 'Customers', icon: <FaUsers />, path: '/customers' },

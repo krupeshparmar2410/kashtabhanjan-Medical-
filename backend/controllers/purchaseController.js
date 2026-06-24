@@ -274,90 +274,103 @@ const getPurchaseById = async (req, res) => {
 // @access  Private
 const updatePurchase = async (req, res) => {
   try {
-    const purchase = await Purchase.findOne({ _id: req.params.id, isDeleted: false });
-    if (!purchase) {
-      return res.status(404).json({ success: false, message: 'Purchase invoice not found' });
-    }
+    const result = await runInTransaction(async (session) => {
+      const purchase = await Purchase.findOne({ _id: req.params.id, isDeleted: false }).session(session);
+      if (!purchase) {
+        throw new Error('Purchase invoice not found');
+      }
 
-    if (purchase.purchaseStatus !== 'Draft') {
-      return res.status(400).json({ success: false, message: `Cannot update a purchase in ${purchase.purchaseStatus} status` });
-    }
+      if (purchase.purchaseStatus !== 'Draft') {
+        throw new Error(`Cannot update a purchase in ${purchase.purchaseStatus} status`);
+      }
 
-    const {
-      invoiceNumber,
-      invoiceDate,
-      purchaseDate,
-      agencyId,
-      billAmount,
-      gstAmount,
-      discountAmount,
-      grandTotal,
-      paidAmount = 0,
-      creditDays = 0,
-      paymentMethod = 'Cash',
-      remarks = '',
-      items = []
-    } = req.body;
+      const {
+        invoiceNumber,
+        invoiceDate,
+        purchaseDate,
+        agencyId,
+        billAmount,
+        gstAmount,
+        discountAmount,
+        grandTotal,
+        paidAmount = 0,
+        creditDays = 0,
+        paymentMethod = 'Cash',
+        remarks = '',
+        items = []
+      } = req.body;
 
-    if (!items || items.length === 0) {
-      return res.status(400).json({ success: false, message: 'At least one medicine item is required' });
-    }
+      if (!items || items.length === 0) {
+        throw new Error('At least one medicine item is required');
+      }
 
-    const agency = await Agency.findOne({ _id: agencyId, isDeleted: false });
-    if (!agency) {
-      return res.status(404).json({ success: false, message: 'Supplier agency not found' });
-    }
+      const agency = await Agency.findOne({ _id: agencyId, isDeleted: false }).session(session);
+      if (!agency) {
+        throw new Error('Supplier agency not found');
+      }
 
-    const pendingAmount = Number(grandTotal) - Number(paidAmount);
-    const purchaseDateObj = new Date(purchaseDate);
-    const dueDate = new Date(purchaseDateObj.getTime() + creditDays * 24 * 60 * 60 * 1000);
+      const pendingAmount = Number(grandTotal) - Number(paidAmount);
+      const purchaseDateObj = new Date(purchaseDate);
+      const dueDate = new Date(purchaseDateObj.getTime() + creditDays * 24 * 60 * 60 * 1000);
 
-    purchase.invoiceNumber = invoiceNumber;
-    purchase.invoiceDate = invoiceDate;
-    purchase.purchaseDate = purchaseDate;
-    purchase.agencyId = agencyId;
-    purchase.billAmount = billAmount;
-    purchase.gstAmount = gstAmount;
-    purchase.discountAmount = discountAmount;
-    purchase.grandTotal = grandTotal;
-    purchase.paidAmount = paidAmount;
-    purchase.pendingAmount = pendingAmount < 0 ? 0 : pendingAmount;
-    purchase.dueDate = dueDate;
-    purchase.creditDays = creditDays;
-    purchase.paymentMethod = paymentMethod;
-    purchase.remarks = remarks;
-    purchase.updatedBy = req.user.id;
+      purchase.invoiceNumber = invoiceNumber;
+      purchase.invoiceDate = invoiceDate;
+      purchase.purchaseDate = purchaseDate;
+      purchase.agencyId = agencyId;
+      purchase.billAmount = billAmount;
+      purchase.gstAmount = gstAmount;
+      purchase.discountAmount = discountAmount;
+      purchase.grandTotal = grandTotal;
+      purchase.paidAmount = paidAmount;
+      purchase.pendingAmount = pendingAmount < 0 ? 0 : pendingAmount;
+      purchase.dueDate = dueDate;
+      purchase.creditDays = creditDays;
+      purchase.paymentMethod = paymentMethod;
+      purchase.remarks = remarks;
+      purchase.updatedBy = req.user.id;
 
-    await purchase.save();
+      await purchase.save({ session });
 
-    // Re-create items (delete old, insert new)
-    await PurchaseItem.deleteMany({ purchaseId: purchase._id });
+      // Re-create items (delete old, insert new)
+      await PurchaseItem.deleteMany({ purchaseId: purchase._id }).session(session);
 
-    const purchaseItems = items.map(item => ({
-      purchaseId: purchase._id,
-      medicineId: item.medicineId,
-      batchNumber: item.batchNumber,
-      manufacturingDate: item.manufacturingDate,
-      expiryDate: item.expiryDate,
-      quantity: item.quantity,
-      freeQuantity: item.freeQuantity || 0,
-      purchasePrice: item.purchasePrice,
-      sellingPrice: item.sellingPrice,
-      mrp: item.mrp,
-      gstPercentage: item.gstPercentage,
-      discountPercentage: item.discountPercentage || 0,
-      lineTotal: item.lineTotal
-    }));
+      const purchaseItems = items.map(item => ({
+        purchaseId: purchase._id,
+        medicineId: item.medicineId,
+        batchNumber: item.batchNumber,
+        manufacturingDate: item.manufacturingDate,
+        expiryDate: item.expiryDate,
+        quantity: item.quantity,
+        freeQuantity: item.freeQuantity || 0,
+        purchasePrice: item.purchasePrice,
+        sellingPrice: item.sellingPrice,
+        mrp: item.mrp,
+        gstPercentage: item.gstPercentage,
+        discountPercentage: item.discountPercentage || 0,
+        lineTotal: item.lineTotal
+      }));
 
-    await PurchaseItem.insertMany(purchaseItems);
+      await PurchaseItem.insertMany(purchaseItems, { session });
+      return purchase;
+    });
 
     res.json({
       success: true,
-      purchase,
+      purchase: result,
       message: 'Purchase draft updated successfully'
     });
   } catch (error) {
     console.error('Error updating purchase:', error);
+    if (error.message === 'Purchase invoice not found') {
+      return res.status(404).json({ success: false, message: error.message });
+    }
+    if (
+      error.message.startsWith('Cannot update a purchase') || 
+      error.message === 'At least one medicine item is required' || 
+      error.message === 'Supplier agency not found'
+    ) {
+      return res.status(400).json({ success: false, message: error.message });
+    }
     res.status(500).json({ success: false, message: 'Server error updating purchase draft' });
   }
 };

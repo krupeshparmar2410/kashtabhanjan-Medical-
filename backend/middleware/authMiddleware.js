@@ -1,5 +1,6 @@
 const jwt = require('jsonwebtoken');
 const User = require('../models/User');
+const { validateSessionActivity } = require('../config/SecurityService');
 
 const protect = async (req, res, next) => {
   let token;
@@ -25,6 +26,12 @@ const protect = async (req, res, next) => {
 
       if (!req.user) {
         return res.status(401).json({ success: false, message: 'Not authorized, user not found' });
+      }
+
+      // Validate active session status
+      const isSessionActive = await validateSessionActivity(token, req);
+      if (!isSessionActive) {
+        return res.status(401).json({ success: false, message: 'Not authorized, session expired or revoked' });
       }
 
       return next();

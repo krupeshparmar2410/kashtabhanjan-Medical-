@@ -88,10 +88,14 @@ const runStartupHealthChecks = async () => {
     }
   });
 
-  // 6. Verify Backup Encryption Key Length
+  // 6. Verify Backup Encryption Key Length and Strength
   const encKey = process.env.BACKUP_ENCRYPTION_KEY;
-  if (!encKey || encKey.length < 16) {
-    logger.error('BACKUP_ENCRYPTION_KEY length is critically short (must be at least 16 characters). Health checks: FAILED.');
+  if (!encKey || encKey.trim() === '' || encKey === 'default_salt' || encKey === 'default_backup_encryption_key_32bytes') {
+    logger.error('CRITICAL STARTUP ERROR: BACKUP_ENCRYPTION_KEY environment variable is undefined or set to insecure fallback.');
+    process.exit(1);
+  }
+  if (encKey.length < 32) {
+    logger.error('CRITICAL STARTUP ERROR: BACKUP_ENCRYPTION_KEY length is critically short (must be at least 32 characters long).');
     process.exit(1);
   }
 
@@ -135,13 +139,17 @@ const runStartupHealthChecks = async () => {
         const prev = logs[i + 1];
         
         // Calculate hash of current and verify chain
+        const entityIdStr = current.entityId ? current.entityId.toString() : '';
+        const performedByStr = current.performedBy ? current.performedBy.toString() : '';
+        const newValuesStr = current.newValues ? JSON.stringify(current.newValues) : '';
+        
         const dataToHash = 
           current.previousHash + 
           current.actionType + 
           current.module + 
-          current.entityId.toString() + 
-          JSON.stringify(current.newValues) + 
-          current.performedBy.toString();
+          entityIdStr + 
+          newValuesStr + 
+          performedByStr;
         const calculatedHash = crypto.createHash('sha256').update(dataToHash).digest('hex');
 
         if (current.hash !== calculatedHash) {

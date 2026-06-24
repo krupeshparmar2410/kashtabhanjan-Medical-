@@ -898,8 +898,8 @@ const getSettingsHistory = async (req, res, next) => {
 const rotateEncryptionKey = async (req, res, next) => {
   try {
     const { newEncryptionKey } = req.body;
-    if (!newEncryptionKey || newEncryptionKey.length < 16) {
-      return res.status(400).json({ success: false, message: 'New encryption key is required and must be at least 16 characters.' });
+    if (!newEncryptionKey || newEncryptionKey.length < 32) {
+      return res.status(400).json({ success: false, message: 'New encryption key is required and must be at least 32 characters.' });
     }
 
     // Get current keys setting map
@@ -918,8 +918,11 @@ const rotateEncryptionKey = async (req, res, next) => {
     const currentVersion = currentVersionSetting ? Number(currentVersionSetting.value) : 1;
     const nextVersion = currentVersion + 1;
 
-    // Archive current key under old version (uses current BACKUP_ENCRYPTION_KEY or existing fallback)
-    const currentKey = process.env.BACKUP_ENCRYPTION_KEY || 'default_backup_encryption_key_32bytes';
+    // Archive current key under old version
+    const currentKey = process.env.BACKUP_ENCRYPTION_KEY;
+    if (!currentKey) {
+      return res.status(500).json({ success: false, message: 'Current BACKUP_ENCRYPTION_KEY is not defined in environment.' });
+    }
     rotatedKeys[currentVersion] = currentKey;
 
     // Save updated settings

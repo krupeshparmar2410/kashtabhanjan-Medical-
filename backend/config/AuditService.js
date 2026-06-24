@@ -153,8 +153,12 @@ const verifyChainIntegrity = async (operatorId = null) => {
       .digest('hex');
     
     // HMAC Signature using BACKUP_ENCRYPTION_KEY as salt
+    const salt = process.env.BACKUP_ENCRYPTION_KEY;
+    if (!salt) {
+      throw new Error('BACKUP_ENCRYPTION_KEY environment variable is not defined.');
+    }
     const signature = crypto
-      .createHmac('sha256', process.env.BACKUP_ENCRYPTION_KEY || 'default_salt')
+      .createHmac('sha256', salt)
       .update(reportHash)
       .digest('hex');
 

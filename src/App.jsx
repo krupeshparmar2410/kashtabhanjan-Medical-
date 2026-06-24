@@ -15,6 +15,7 @@ import AddPurchase from './pages/AddPurchase';
 import PurchaseDetails from './pages/PurchaseDetails';
 import InventoryDashboard from './pages/InventoryDashboard';
 import Billing from './pages/Billing';
+import SalesReturns from './pages/SalesReturns';
 import CustomersList from './pages/CustomersList';
 import CustomerDetails from './pages/CustomerDetails';
 import CreditAccounts from './pages/CreditAccounts';
@@ -48,6 +49,7 @@ import './styles/PurchaseList.css';
 import './styles/AddPurchase.css';
 import './styles/PurchaseDetails.css';
 import './styles/InventoryDashboard.css';
+import './styles/SalesReturns.css';
 
 function App() {
   const [user, setUser] = useState(null);
@@ -273,6 +275,18 @@ function App() {
             <ProtectedRoute>
               <Layout user={user} handleLogout={handleLogout}>
                 <Billing />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* Sales Returns */}
+        <Route
+          path="/sales-returns"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <SalesReturns />
               </Layout>
             </ProtectedRoute>
           }

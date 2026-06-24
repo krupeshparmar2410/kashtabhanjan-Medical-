@@ -55,7 +55,10 @@ const models = {
  * Derives encryption key from the current env key or rotated keys
  */
 const getEncryptionKey = (version = 1) => {
-  const currentKey = process.env.BACKUP_ENCRYPTION_KEY || 'default_backup_encryption_key_32bytes';
+  const currentKey = process.env.BACKUP_ENCRYPTION_KEY;
+  if (!currentKey) {
+    throw new Error('BACKUP_ENCRYPTION_KEY environment variable is not defined.');
+  }
   if (version === 1) {
     return crypto.scryptSync(currentKey, 'salt', 32);
   }

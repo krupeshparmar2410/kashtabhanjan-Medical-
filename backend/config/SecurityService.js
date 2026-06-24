@@ -160,7 +160,7 @@ const forceLogoutAllUserSessions = async (userId, reason = 'Credential modificat
 /**
  * Validates request session token (checks isRevoked, timeout, inactivity)
  */
-const validateSessionActivity = async (token) => {
+const validateSessionActivity = async (token, req = null) => {
   const session = await ActiveSession.findOne({ sessionToken: token, isRevoked: false });
   if (!session) {
     return false;
@@ -170,6 +170,15 @@ const validateSessionActivity = async (token) => {
   if (session.expiresAt && session.expiresAt <= new Date()) {
     session.isRevoked = true;
     await session.save();
+    
+    // Log session expiration
+    await logSystemAction(req, {
+      actionType: 'User Session Expired',
+      module: 'Security',
+      entityType: 'ActiveSession',
+      entityId: session._id,
+      remarks: `Session expired. Token starts with ${session.sessionToken.slice(0, 10)}...`
+    });
     return false;
   }
 
@@ -180,6 +189,15 @@ const validateSessionActivity = async (token) => {
   if (session.lastActivityAt < cutoffTime) {
     session.isRevoked = true;
     await session.save();
+    
+    // Log session inactivity timeout
+    await logSystemAction(req, {
+      actionType: 'User Session Inactivity Timeout',
+      module: 'Security',
+      entityType: 'ActiveSession',
+      entityId: session._id,
+      remarks: `Session timed out due to ${inactivityLimitMins} mins of inactivity. Token starts with ${session.sessionToken.slice(0, 10)}...`
+    });
     return false;
   }
 
