@@ -1,5 +1,5 @@
 import React, { useState, useEffect, useRef } from 'react';
-import { medicineAPI, customerAPI, saleAPI, prescriptionAPI } from '../services/api';
+import { medicineAPI, customerAPI, saleAPI, prescriptionAPI, inventoryAPI } from '../services/api';
 import '../styles/AddAgency.css'; // Reuse form card stylings
 
 const Billing = () => {
@@ -154,13 +154,8 @@ const Billing = () => {
       // Get batches using FEFO allocation list
       const batchRes = await medicineAPI.getMedicineById(med._id);
       if (batchRes.success) {
-        // Fetch batches directly via inventory FEFO api
-        const invRes = await medicineAPI.getStats(); // fallback check or fetch direct FEFO
-        // Let's call the FEFO endpoint we built:
-        const response = await fetch(`/api/inventory/fefo/${med._id}`, {
-          headers: { 'Authorization': `Bearer ${localStorage.getItem('token')}` }
-        });
-        const data = await response.json();
+        // Fetch batches via inventory FEFO API
+        const data = await inventoryAPI.getFEFO(med._id);
         
         if (!data.success || data.batches.length === 0) {
           setSelectedMedicineForSubs(med);

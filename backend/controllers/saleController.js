@@ -139,62 +139,68 @@ const createSale = async (req, res, next) => {
         const rxReq = medicine.prescriptionRequired === true || medicine.prescriptionRequired === 'Yes' || medicine.scheduleCategory !== 'Normal' || medicine.scheduleH || medicine.scheduleH1 || medicine.scheduleX;
         if (rxReq) {
           rxReqFound = true;
-          const Prescription = require('../models/Prescription');
           const rxId = item.prescriptionId || req.body.prescriptionId;
           const rxNum = item.prescriptionNumber || req.body.prescriptionNumber || prescriptionNumber;
 
-          let rx;
-          if (rxId) {
-            rx = await Prescription.findOne({ _id: rxId, isArchived: false }).session(session);
-          } else if (rxNum) {
-            rx = await Prescription.findOne({ prescriptionNumber: rxNum, isArchived: false }).session(session);
-          }
+          if (customer.customerType === 'Walk-In') {
+            if (!rxNum || rxNum.trim() === '') {
+              throw new Error(`Restricted medicine "${medicine.medicineName}" (Schedule ${medicine.scheduleCategory || 'H/H1/X'}) requires a prescription number for Walk-In checkout`);
+            }
+          } else {
+            const Prescription = require('../models/Prescription');
+            let rx;
+            if (rxId) {
+              rx = await Prescription.findOne({ _id: rxId, isArchived: false }).session(session);
+            } else if (rxNum) {
+              rx = await Prescription.findOne({ prescriptionNumber: rxNum, isArchived: false }).session(session);
+            }
 
-          if (!rx) {
-            throw new Error(`Restricted medicine "${medicine.medicineName}" (Schedule ${medicine.scheduleCategory || 'H/H1/X'}) requires a valid approved doctor prescription`);
-          }
+            if (!rx) {
+              throw new Error(`Restricted medicine "${medicine.medicineName}" (Schedule ${medicine.scheduleCategory || 'H/H1/X'}) requires a valid approved doctor prescription`);
+            }
 
-          if (String(rx.customerId) !== String(customerId)) {
-            throw new Error(`Prescription patient customer mismatch: Prescription does not belong to the selected customer.`);
-          }
+            if (String(rx.customerId) !== String(customerId)) {
+              throw new Error(`Prescription patient customer mismatch: Prescription does not belong to the selected customer.`);
+            }
 
-          if (rx.status !== 'Approved') {
-            throw new Error(`Prescription is not approved. Current status: ${rx.status}`);
-          }
+            if (rx.status !== 'Approved') {
+              throw new Error(`Prescription is not approved. Current status: ${rx.status}`);
+            }
 
-          if (rx.expiryDate && new Date(rx.expiryDate) < new Date()) {
-            throw new Error(`Prescription has expired on ${rx.expiryDate.toLocaleDateString()}`);
-          }
+            if (rx.expiryDate && new Date(rx.expiryDate) < new Date()) {
+              throw new Error(`Prescription has expired on ${rx.expiryDate.toLocaleDateString()}`);
+            }
 
-          const rxMedicine = rx.medicines.find(m => String(m.medicineId) === String(medicine._id));
-          if (!rxMedicine) {
-            throw new Error(`Medicine "${medicine.medicineName}" is not listed in prescription ${rx.prescriptionNumber}`);
-          }
+            const rxMedicine = rx.medicines.find(m => String(m.medicineId) === String(medicine._id));
+            if (!rxMedicine) {
+              throw new Error(`Medicine "${medicine.medicineName}" is not listed in prescription ${rx.prescriptionNumber}`);
+            }
 
-          if (rxMedicine.quantityRemaining < item.quantity) {
-            throw new Error(`Billed quantity ${item.quantity} exceeds allowed prescription quantity remaining (${rxMedicine.quantityRemaining} units left)`);
-          }
+            if (rxMedicine.quantityRemaining < item.quantity) {
+              throw new Error(`Billed quantity ${item.quantity} exceeds allowed prescription quantity remaining (${rxMedicine.quantityRemaining} units left)`);
+            }
 
-          // Decrement remaining allowed, increment consumed inside transaction
-          rxMedicine.quantityConsumed += item.quantity;
-          rxMedicine.quantityRemaining -= item.quantity;
-          if (rxMedicine.quantityRemaining < 0) {
-            throw new Error(`Validation Error: Prescription quantity remaining cannot be negative.`);
-          }
-          rx.lastUsedAt = new Date();
-          await rx.save({ session });
+            // Decrement remaining allowed, increment consumed inside transaction
+            rxMedicine.quantityConsumed += item.quantity;
+            rxMedicine.quantityRemaining -= item.quantity;
+            if (rxMedicine.quantityRemaining < 0) {
+              throw new Error(`Validation Error: Prescription quantity remaining cannot be negative.`);
+            }
+            rx.lastUsedAt = new Date();
+            await rx.save({ session });
 
-          if (!linkedPrescriptions.includes(String(rx._id))) {
-            linkedPrescriptions.push(String(rx._id));
+            if (!linkedPrescriptions.includes(String(rx._id))) {
+              linkedPrescriptions.push(String(rx._id));
+            }
+            prescriptionUsagesToCreate.push({
+              prescriptionId: rx._id,
+              medicineId: medicine._id,
+              quantityConsumed: item.quantity,
+              billedQuantity: item.quantity,
+              invoiceNumber,
+              verifiedBy: req.user.id
+            });
           }
-          prescriptionUsagesToCreate.push({
-            prescriptionId: rx._id,
-            medicineId: medicine._id,
-            quantityConsumed: item.quantity,
-            billedQuantity: item.quantity,
-            invoiceNumber,
-            verifiedBy: req.user.id
-          });
         }
 
         // FEFO Stock allocation logic
