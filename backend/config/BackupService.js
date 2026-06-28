@@ -122,7 +122,13 @@ const createFullBackup = async (operatorId, notes = '', targetFolder = 'backups/
       // Serialize all collections
       for (const [name, Model] of Object.entries(models)) {
         if (name === 'SystemBackup' || name === 'BackupVerificationHistory' || name === 'ActiveSession') continue;
-        const docs = await Model.find({}).session(session).lean();
+        
+        let query = Model.find({});
+        if (name === 'User') {
+          query = query.select('+password');
+        }
+        
+        const docs = await query.session(session).lean();
         dumpData.collections[name] = docs || [];
       }
 
@@ -243,121 +249,17 @@ const validateBackupFile = (absoluteFilePath, keyVersion, recordedTagHex, record
   return dumpData;
 };
 
+const { performStagingRestoreAndSwap, runIsolatedDrill } = require('./RestoreService');
+
 /**
- * Transaction-Safe Restoration swapping collections using TransactionManager
+ * Transaction-Safe Restoration swapping collections using Staging and Atomic Swap
  */
 const restoreFromBackup = async (operatorId, fileName, confirmationPhrase) => {
-  if (confirmationPhrase !== 'RESTORE SYSTEM STATE') {
-    throw new Error('Restoration aborted: Invalid confirmation phrase.');
-  }
-
-  const meta = await SystemBackup.findOne({ fileName, isArchived: false });
-  if (!meta) {
-    throw new Error('Backup record metadata not found or has been archived.');
-  }
-
-  const storageRoot = path.join(__dirname, '../../storage');
-  const absoluteFilePath = path.join(storageRoot, meta.filePath);
-
-  logger.info(`Starting restore safety checks for backup: ${meta.backupNumber}`);
-
-  let recoveryRecord;
-  try {
-    recoveryRecord = await createFullBackup(operatorId, `Automatic pre-restore rollback recovery point for BKP-${meta.backupNumber}`, 'recovery');
-    logger.info(`Pre-restore safety recovery point created: ${recoveryRecord.backupNumber}`);
-  } catch (backupErr) {
-    throw new Error(`Failed to create pre-restore recovery rollback checkpoint: ${backupErr.message}. Restoration aborted.`);
-  }
-
-  let dumpData;
-  try {
-    dumpData = validateBackupFile(absoluteFilePath, meta.keyVersion, meta.encryptionTag, meta.checksum);
-    
-    const required = ['User', 'Settings', 'AuditLog'];
-    const missing = required.filter(col => !dumpData.collections[col]);
-    if (missing.length > 0) {
-      throw new Error(`Invalid backup document set. Missing required collections: [${missing.join(', ')}].`);
-    }
-    logger.info('Decryption, Checksum, and Version Compatibility validations: PASSED.');
-  } catch (valErr) {
-    const { logSystemAction } = require('./AuditService');
-    await logSystemAction(null, {
-      actionType: 'Database Restore Compatibility Failure',
-      module: 'Security',
-      entityType: 'SystemBackup',
-      entityId: meta._id,
-      newValues: { fileName, error: valErr.message },
-      status: 'Failed',
-      remarks: `Compatibility check failed during restore: ${valErr.message}`
-    });
-    throw valErr;
-  }
-
-  try {
-    return await runInTransaction(async (session) => {
-      for (const [name, Model] of Object.entries(models)) {
-        if (name === 'SystemBackup' || name === 'BackupVerificationHistory' || name === 'ActiveSession') continue;
-
-        const documents = dumpData.collections[name] || [];
-        const tempCollectionName = `temp_${Model.collection.name}`;
-        const TempModel = mongoose.model(tempCollectionName, Model.schema, tempCollectionName);
-
-        await TempModel.deleteMany({}).session(session);
-        
-        if (documents.length > 0) {
-          await TempModel.insertMany(documents, { session });
-        }
-
-        const tempCount = await TempModel.countDocuments().session(session);
-        if (tempCount !== documents.length) {
-          throw new Error(`Document count validation mismatch on collection ${name}. Expected: ${documents.length}, Loaded: ${tempCount}`);
-        }
-      }
-
-      for (const [name, Model] of Object.entries(models)) {
-        if (name === 'SystemBackup' || name === 'BackupVerificationHistory' || name === 'ActiveSession') continue;
-
-        const activeCollectionName = Model.collection.name;
-        const tempCollectionName = `temp_${activeCollectionName}`;
-
-        await mongoose.connection.db.dropCollection(activeCollectionName).catch(() => {});
-        await mongoose.connection.db.renameCollection(tempCollectionName, activeCollectionName);
-      }
-
-      logger.info(`System successfully restored from backup ${meta.backupNumber}.`);
-
-      const { reloadCache } = require('./SettingsService');
-      await reloadCache();
-
-      return { success: true, message: `System database successfully restored from BKP-${meta.backupNumber}.` };
-    });
-  } catch (restoreErr) {
-    logger.error('Restore transaction failed. Initiating automatic rollback recovery...', restoreErr);
-
-    try {
-      const recoveryPath = path.join(storageRoot, recoveryRecord.filePath);
-      const rollbackDump = validateBackupFile(recoveryPath, recoveryRecord.keyVersion, recoveryRecord.encryptionTag, recoveryRecord.checksum);
-      
-      for (const [name, Model] of Object.entries(models)) {
-        if (name === 'SystemBackup' || name === 'BackupVerificationHistory' || name === 'ActiveSession') continue;
-        
-        await Model.deleteMany({});
-        const docs = rollbackDump.collections[name] || [];
-        if (docs.length > 0) {
-          await Model.insertMany(docs);
-        }
-      }
-      logger.info('Automatic recovery rollback completed successfully. Database state returned to pre-restore snapshot.');
-    } catch (rollbackErr) {
-      logger.error('CRITICAL DATABASE ROLLBACK RECOVERY FAILED. Database may be corrupt.', rollbackErr);
-    }
-
-    throw restoreErr;
-  }
+  return await performStagingRestoreAndSwap(operatorId, fileName, confirmationPhrase);
 };
 
 /**
- * Weekly Scheduled verification restore test
+ * Weekly Scheduled verification restore test using isolated DR drill database
  */
 const runWeeklyBackupVerification = async (operatorId = null) => {
   const startTime = Date.now();
@@ -375,15 +277,14 @@ const runWeeklyBackupVerification = async (operatorId = null) => {
   let errorMessage = '';
 
   try {
-    const dump = validateBackupFile(absoluteFilePath, latestBackup.keyVersion, latestBackup.encryptionTag, latestBackup.checksum);
-    
-    for (const [name, Model] of Object.entries(models)) {
-      if (name === 'SystemBackup' || name === 'BackupVerificationHistory' || name === 'ActiveSession') continue;
-      const docCount = dump.collections[name] ? dump.collections[name].length : 0;
-      if (docCount === 0 && name === 'User') {
-        throw new Error('User collection check returned 0 profiles.');
-      }
-    }
+    // Run isolated drill validation
+    await runIsolatedDrill(
+      operatorId || latestBackup.createdBy,
+      absoluteFilePath,
+      latestBackup.keyVersion,
+      latestBackup.encryptionTag,
+      latestBackup.checksum
+    );
     result = 'Passed';
     latestBackup.healthStatus = 'Passed';
   } catch (err) {
@@ -413,5 +314,8 @@ module.exports = {
   createFullBackup,
   restoreFromBackup,
   runWeeklyBackupVerification,
-  getEncryptionKey
+  getEncryptionKey,
+  validateBackupFile,
+  checkStorageSpace
 };
+

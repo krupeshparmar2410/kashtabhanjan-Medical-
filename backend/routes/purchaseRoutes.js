@@ -17,6 +17,7 @@ const {
   importPurchaseExcelCSV
 } = require('../controllers/purchaseController');
 const { protect } = require('../middleware/authMiddleware');
+const { authorize } = require('../middleware/roleMiddleware');
 
 // Protect all routes
 router.use(protect);
@@ -28,29 +29,29 @@ router.get('/gst-summary', getPurchaseGSTSummary);
 // Returns
 router.route('/returns')
   .get(getPurchaseReturns)
-  .post(createPurchaseReturn);
+  .post(authorize('admin', 'pharmacist'), createPurchaseReturn);
 
 // Supplier Payments
 router.route('/payments')
   .get(getSupplierPayments)
-  .post(createSupplierPayment);
+  .post(authorize('admin', 'pharmacist'), createSupplierPayment);
 
 // Bulk CSV/Excel Import
-router.post('/import', importPurchaseExcelCSV);
+router.post('/import', authorize('admin', 'pharmacist'), importPurchaseExcelCSV);
 
 // Main collection routes
 router.route('/')
   .get(getPurchases)
-  .post(createPurchase);
+  .post(authorize('admin', 'pharmacist'), createPurchase);
 
 // Individual resource routes
 router.route('/:id')
   .get(getPurchaseById)
-  .put(updatePurchase)
-  .delete(deletePurchase);
+  .put(authorize('admin', 'pharmacist'), updatePurchase)
+  .delete(authorize('admin'), deletePurchase);
 
 // Post / Approve purchase (Inventory updates and ledger registration)
-router.post('/:id/post', postPurchase);
+router.post('/:id/post', authorize('admin', 'pharmacist'), postPurchase);
 
 // Print PDF layout raw data
 router.get('/:id/pdf', exportInvoicePDF);

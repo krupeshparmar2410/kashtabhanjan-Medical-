@@ -1,4 +1,5 @@
 const mongoose = require('mongoose');
+const logger = require('../config/logger');
 const Sale = require('../models/Sale');
 const SaleItem = require('../models/SaleItem');
 const SalesReturn = require('../models/SalesReturn');
@@ -14,6 +15,7 @@ const MedicineRecall = require('../models/MedicineRecall');
 const Notification = require('../models/Notification');
 const FailedTransaction = require('../models/FailedTransaction');
 const AuditLog = require('../models/AuditLog');
+const CashClosing = require('../models/CashClosing');
 const { getNextSequence } = require('../config/SequenceService');
 const { getSetting } = require('../config/SettingsService');
 
@@ -86,15 +88,17 @@ const createSale = async (req, res, next) => {
       redeemLoyalty = false,
       adminOverrideUsed = false,
       adminOverrideReason = '',
-      idempotencyKey
+      idempotencyKey,
+      invoiceStatus = 'Completed',
+      draftSaleId
     } = req.body;
 
     if (!items || items.length === 0) {
       return res.status(400).json({ success: false, message: 'POS Invoice must contain at least one medicine item.' });
     }
 
-    // Check Idempotency to prevent duplicate checkouts
-    if (idempotencyKey) {
+    // Check Idempotency to prevent duplicate checkouts (only for non-draft checkouts)
+    if (idempotencyKey && invoiceStatus !== 'Draft') {
       const duplicate = await Sale.findOne({ idempotencyKey, isDeleted: false });
       if (duplicate) {
         return res.status(200).json({
@@ -102,6 +106,36 @@ const createSale = async (req, res, next) => {
           sale: duplicate,
           message: 'Retrieved duplicate transaction invoice cached reference (idempotency safety triggered).'
         });
+      }
+    }
+
+    // Find existing draft if resuming a draft
+    let draftSale = null;
+    let invoiceNumber;
+    if (draftSaleId) {
+      draftSale = await Sale.findOne({ _id: draftSaleId, invoiceStatus: 'Draft', isDeleted: false });
+      if (!draftSale) {
+        return res.status(404).json({ success: false, message: 'Draft invoice not found or is no longer in Draft status' });
+      }
+      invoiceNumber = draftSale.invoiceNumber;
+    } else {
+      const invoicePrefix = getSetting('INVOICE_PREFIX', 'INV');
+      
+      // Self-healing duplicate invoice number collision protection
+      let collision = true;
+      let attempts = 0;
+      while (collision && attempts < 10) {
+        invoiceNumber = await getNextSequence('salesInvoiceNumber', invoicePrefix);
+        const existingInvoice = await Sale.findOne({ invoiceNumber, isDeleted: false });
+        if (!existingInvoice) {
+          collision = false;
+        } else {
+          logger.warn(`Sequence collision: Invoice number ${invoiceNumber} already exists in DB. Auto-incrementing sequence.`);
+          attempts++;
+        }
+      }
+      if (collision) {
+        return res.status(409).json({ success: false, message: 'Failed to generate a unique invoice number sequence due to high rate of collisions' });
       }
     }
 
@@ -115,461 +149,635 @@ const createSale = async (req, res, next) => {
       }
     }
 
-    const invoicePrefix = getSetting('INVOICE_PREFIX', 'INV');
-    const invoiceNumber = await getNextSequence('salesInvoiceNumber', invoicePrefix);
-
     // Run POS operation wrapped in transaction
     const savedSale = await runInTransaction(async (session) => {
-      let subtotal = 0;
-      let gstAmount = 0;
-      let totalPurchaseCost = 0;
-      const saleItemsData = [];
-      const linkedPrescriptions = [];
-      const prescriptionUsagesToCreate = [];
-      let rxReqFound = false;
+      // Track original states and created documents for manual rollback if standalone MongoDB fails
+      const createdDocs = [];
+      const originalBatches = [];
+      const originalMedicines = [];
+      const originalPrescriptions = [];
+      let originalCustomer = null;
 
-      // Process items FEFO and compliance checks
-      for (const item of items) {
-        const medicine = await Medicine.findOne({ _id: item.medicineId, isDeleted: false }).session(session);
-        if (!medicine) {
-          throw new Error(`Medicine code ${item.medicineId} not found or has been deleted`);
+      try {
+        if (draftSaleId) {
+          const draftSaleObj = await Sale.findOne({ _id: draftSaleId, invoiceStatus: 'Draft', isDeleted: false }).session(session);
+          if (!draftSaleObj) {
+            throw new Error(`Draft invoice ID ${draftSaleId} not found or is no longer in Draft status`);
+          }
+
+          // Release existing draft reservations to prevent duplicate count/leaks
+          const draftItems = await SaleItem.find({ saleId: draftSaleObj._id }).session(session);
+          for (const item of draftItems) {
+            for (const itemBatch of item.batches) {
+              const batch = await InventoryBatch.findById(itemBatch.inventoryBatchId).session(session);
+              if (batch) {
+                batch.reservedQuantity = Math.max(0, (batch.reservedQuantity || 0) - itemBatch.quantity);
+                batch.availableQuantity = Math.round((batch.availableQuantity + itemBatch.quantity) * 100) / 100;
+                if (batch.status === 'Sold Out' || batch.availableQuantity > 0) {
+                  const todayDate = new Date();
+                  if (new Date(batch.expiryDate) > todayDate && !batch.isLocked) {
+                    batch.status = 'Active';
+                    batch.isSaleBlocked = false;
+                  } else if (new Date(batch.expiryDate) <= todayDate) {
+                    batch.status = 'Expired';
+                    batch.isSaleBlocked = true;
+                  }
+                }
+                await batch.save({ session });
+              }
+              
+              const medicine = await Medicine.findById(item.medicineId).session(session);
+              if (medicine) {
+                medicine.currentStock = Math.round((medicine.currentStock + itemBatch.quantity) * 100) / 100;
+                await medicine.save({ session });
+              }
+            }
+          }
+
+          // Delete existing SaleItems for this draft so new ones can be inserted
+          await SaleItem.deleteMany({ saleId: draftSaleObj._id }).session(session);
         }
 
-        // Compliance checks for Schedule H, H1, X or general prescriptions
-        const rxReq = medicine.prescriptionRequired === true || medicine.prescriptionRequired === 'Yes' || medicine.scheduleCategory !== 'Normal' || medicine.scheduleH || medicine.scheduleH1 || medicine.scheduleX;
-        if (rxReq) {
-          rxReqFound = true;
-          const rxId = item.prescriptionId || req.body.prescriptionId;
-          const rxNum = item.prescriptionNumber || req.body.prescriptionNumber || prescriptionNumber;
+        if (customer) {
+          originalCustomer = {
+            id: customer._id,
+            outstandingBalance: customer.outstandingBalance,
+            loyaltyPoints: customer.loyaltyPoints
+          };
+        }
 
-          if (customer.customerType === 'Walk-In') {
-            if (!rxNum || rxNum.trim() === '') {
-              throw new Error(`Restricted medicine "${medicine.medicineName}" (Schedule ${medicine.scheduleCategory || 'H/H1/X'}) requires a prescription number for Walk-In checkout`);
-            }
-          } else {
-            const Prescription = require('../models/Prescription');
-            let rx;
-            if (rxId) {
-              rx = await Prescription.findOne({ _id: rxId, isArchived: false }).session(session);
-            } else if (rxNum) {
-              rx = await Prescription.findOne({ prescriptionNumber: rxNum, isArchived: false }).session(session);
-            }
+        let subtotal = 0;
+        let gstAmount = 0;
+        let totalPurchaseCost = 0;
+        const saleItemsData = [];
+        const linkedPrescriptions = [];
+        const prescriptionUsagesToCreate = [];
+        let rxReqFound = false;
 
-            if (!rx) {
-              throw new Error(`Restricted medicine "${medicine.medicineName}" (Schedule ${medicine.scheduleCategory || 'H/H1/X'}) requires a valid approved doctor prescription`);
-            }
+        // Process items FEFO and compliance checks
+        for (const item of items) {
+          const medicine = await Medicine.findOne({ _id: item.medicineId, isDeleted: false }).session(session);
+          if (!medicine) {
+            throw new Error(`Medicine code ${item.medicineId} not found or has been deleted`);
+          }
 
-            if (String(rx.customerId) !== String(customerId)) {
-              throw new Error(`Prescription patient customer mismatch: Prescription does not belong to the selected customer.`);
-            }
+          // Snapshot medicine stock before update
+          originalMedicines.push({
+            id: medicine._id,
+            currentStock: medicine.currentStock
+          });
 
-            if (rx.status !== 'Approved') {
-              throw new Error(`Prescription is not approved. Current status: ${rx.status}`);
-            }
+          // Compliance checks for Schedule H, H1, X or general prescriptions
+          const rxReq = medicine.prescriptionRequired === true || medicine.prescriptionRequired === 'Yes' || medicine.scheduleCategory !== 'Normal' || medicine.scheduleH || medicine.scheduleH1 || medicine.scheduleX;
+          if (rxReq) {
+            rxReqFound = true;
+            const rxId = item.prescriptionId || req.body.prescriptionId;
+            const rxNum = item.prescriptionNumber || req.body.prescriptionNumber || prescriptionNumber;
 
-            if (rx.expiryDate && new Date(rx.expiryDate) < new Date()) {
-              throw new Error(`Prescription has expired on ${rx.expiryDate.toLocaleDateString()}`);
-            }
+            if (customer.customerType === 'Walk-In') {
+              if (!rxNum || rxNum.trim() === '') {
+                throw new Error(`Restricted medicine "${medicine.medicineName}" (Schedule ${medicine.scheduleCategory || 'H/H1/X'}) requires a prescription number for Walk-In checkout`);
+              }
+            } else {
+              const Prescription = require('../models/Prescription');
+              let rx;
+              if (rxId) {
+                rx = await Prescription.findOne({ _id: rxId, isArchived: false }).session(session);
+              } else if (rxNum) {
+                rx = await Prescription.findOne({ prescriptionNumber: rxNum, isArchived: false }).session(session);
+              }
 
-            const rxMedicine = rx.medicines.find(m => String(m.medicineId) === String(medicine._id));
-            if (!rxMedicine) {
-              throw new Error(`Medicine "${medicine.medicineName}" is not listed in prescription ${rx.prescriptionNumber}`);
-            }
+              if (!rx) {
+                throw new Error(`Restricted medicine "${medicine.medicineName}" (Schedule ${medicine.scheduleCategory || 'H/H1/X'}) requires a valid approved doctor prescription`);
+              }
 
-            if (rxMedicine.quantityRemaining < item.quantity) {
-              throw new Error(`Billed quantity ${item.quantity} exceeds allowed prescription quantity remaining (${rxMedicine.quantityRemaining} units left)`);
-            }
+              if (String(rx.customerId) !== String(customerId)) {
+                throw new Error(`Prescription patient customer mismatch: Prescription does not belong to the selected customer.`);
+              }
 
-            // Decrement remaining allowed, increment consumed inside transaction
-            rxMedicine.quantityConsumed += item.quantity;
-            rxMedicine.quantityRemaining -= item.quantity;
-            if (rxMedicine.quantityRemaining < 0) {
-              throw new Error(`Validation Error: Prescription quantity remaining cannot be negative.`);
-            }
-            rx.lastUsedAt = new Date();
-            await rx.save({ session });
+              if (rx.status !== 'Approved') {
+                throw new Error(`Prescription is not approved. Current status: ${rx.status}`);
+              }
 
-            if (!linkedPrescriptions.includes(String(rx._id))) {
-              linkedPrescriptions.push(String(rx._id));
+              if (rx.expiryDate && new Date(rx.expiryDate) < new Date()) {
+                throw new Error(`Prescription has expired on ${rx.expiryDate.toLocaleDateString()}`);
+              }
+
+              const rxMedicine = rx.medicines.find(m => String(m.medicineId) === String(medicine._id));
+              if (!rxMedicine) {
+                throw new Error(`Medicine "${medicine.medicineName}" is not listed in prescription ${rx.prescriptionNumber}`);
+              }
+
+              if (rxMedicine.quantityRemaining < item.quantity) {
+                throw new Error(`Billed quantity ${item.quantity} exceeds allowed prescription quantity remaining (${rxMedicine.quantityRemaining} units left)`);
+              }
+
+              // Snapshot prescription before decrement
+              originalPrescriptions.push({
+                id: rx._id,
+                lastUsedAt: rx.lastUsedAt,
+                medicines: rx.medicines.map(m => ({
+                  medicineId: m.medicineId,
+                  quantityBilled: m.quantityBilled,
+                  quantityConsumed: m.quantityConsumed,
+                  quantityRemaining: m.quantityRemaining
+                }))
+              });
+
+              // Decrement remaining allowed, increment consumed inside transaction
+              rxMedicine.quantityConsumed += item.quantity;
+              rxMedicine.quantityRemaining -= item.quantity;
+              if (rxMedicine.quantityRemaining < 0) {
+                throw new Error(`Validation Error: Prescription quantity remaining cannot be negative.`);
+              }
+              rx.lastUsedAt = new Date();
+              await rx.save({ session });
+
+              if (!linkedPrescriptions.includes(String(rx._id))) {
+                linkedPrescriptions.push(String(rx._id));
+              }
+              prescriptionUsagesToCreate.push({
+                prescriptionId: rx._id,
+                medicineId: medicine._id,
+                quantityConsumed: item.quantity,
+                billedQuantity: item.quantity,
+                invoiceNumber,
+                verifiedBy: req.user.id
+              });
             }
-            prescriptionUsagesToCreate.push({
-              prescriptionId: rx._id,
-              medicineId: medicine._id,
-              quantityConsumed: item.quantity,
-              billedQuantity: item.quantity,
-              invoiceNumber,
-              verifiedBy: req.user.id
+          }
+
+          // FEFO Stock allocation logic
+          let remainingQty = item.quantity;
+          const consumedBatches = [];
+
+          // Exclude expired, locked, sale blocked, recalled
+          const today = new Date();
+          const batches = await InventoryBatch.find({
+            medicineId: medicine._id,
+            isDeleted: false,
+            isLocked: false,
+            isSaleBlocked: false,
+            recallStatus: 'Normal',
+            expiryDate: { $gt: today },
+            availableQuantity: { $gt: 0 }
+          })
+            .sort({ expiryDate: 1 })
+            .session(session);
+
+          for (const batch of batches) {
+            if (remainingQty <= 0) break;
+
+            const takeQty = Math.min(batch.availableQuantity, remainingQty);
+
+            // Snapshot batch state before decrement
+            originalBatches.push({
+              id: batch._id,
+              availableQuantity: batch.availableQuantity,
+              status: batch.status,
+              isSaleBlocked: batch.isSaleBlocked,
+              reservedQuantity: batch.reservedQuantity || 0
             });
+
+            batch.availableQuantity = Math.round((batch.availableQuantity - takeQty) * 100) / 100;
+            if (invoiceStatus === 'Draft') {
+              batch.reservedQuantity = (batch.reservedQuantity || 0) + takeQty;
+            }
+            if (batch.availableQuantity === 0) {
+              batch.status = 'Sold Out';
+              batch.isSaleBlocked = true;
+            }
+            await batch.save({ session });
+
+            consumedBatches.push({
+              inventoryBatchId: batch._id,
+              batchNumber: batch.batchNumber,
+              expiryDate: batch.expiryDate,
+              quantity: takeQty,
+              purchasePrice: batch.purchasePrice,
+              sellingPrice: batch.sellingPrice,
+              mrp: batch.mrp
+            });
+
+            // Log inventory movement activity
+            const invAct = new InventoryActivity({
+              inventoryBatchId: batch._id,
+              action: 'Sale',
+              description: `Deducted ${takeQty} units for Sale Invoice ${invoiceNumber}`,
+              performedBy: req.user.id
+            });
+            await invAct.save({ session });
+            createdDocs.push(invAct);
+
+            totalPurchaseCost += takeQty * batch.purchasePrice;
+            remainingQty -= takeQty;
           }
-        }
 
-        // FEFO Stock allocation logic
-        let remainingQty = item.quantity;
-        const consumedBatches = [];
-
-        // Exclude expired, locked, sale blocked, recalled
-        const today = new Date();
-        const batches = await InventoryBatch.find({
-          medicineId: medicine._id,
-          isDeleted: false,
-          isLocked: false,
-          isSaleBlocked: false,
-          recallStatus: 'Normal',
-          expiryDate: { $gt: today },
-          availableQuantity: { $gt: 0 }
-        })
-          .sort({ expiryDate: 1 })
-          .session(session);
-
-        for (const batch of batches) {
-          if (remainingQty <= 0) break;
-
-          const takeQty = Math.min(batch.availableQuantity, remainingQty);
-          batch.availableQuantity = Math.round((batch.availableQuantity - takeQty) * 100) / 100;
-          if (batch.availableQuantity === 0) {
-            batch.status = 'Sold Out';
-            batch.isSaleBlocked = true;
+          if (remainingQty > 0) {
+            throw new Error(`Insufficient stock for medicine "${medicine.medicineName}". Missing ${remainingQty} units.`);
           }
-          await batch.save({ session });
 
-          consumedBatches.push({
-            inventoryBatchId: batch._id,
-            batchNumber: batch.batchNumber,
-            expiryDate: batch.expiryDate,
-            quantity: takeQty,
-            purchasePrice: batch.purchasePrice,
-            sellingPrice: batch.sellingPrice,
-            mrp: batch.mrp
-          });
+          // Deduct Medicine Master current stock
+          medicine.currentStock = Math.max(0, medicine.currentStock - item.quantity);
+          await medicine.save({ session });
 
-          // Log inventory movement activity
-          const invAct = new InventoryActivity({
-            inventoryBatchId: batch._id,
-            action: 'Sale',
-            description: `Deducted ${takeQty} units for Sale Invoice ${invoiceNumber}`,
-            performedBy: req.user.id
-          });
-          await invAct.save({ session });
+          // Item Price calculations
+          const sellingPrice = item.sellingPrice || medicine.sellingPrice;
+          const mrp = item.mrp || medicine.mrp;
+          const gstPct = medicine.gstPercentage || 0;
+          const discPct = item.discountPercentage || 0;
 
-          totalPurchaseCost += takeQty * batch.purchasePrice;
-          remainingQty -= takeQty;
-        }
+          let lineSubtotal = 0;
+          let lineGst = 0;
+          let lineDiscount = 0;
+          let lineTotal = 0;
 
-        if (remainingQty > 0) {
-          throw new Error(`Insufficient stock for medicine "${medicine.medicineName}". Missing ${remainingQty} units.`);
-        }
+          if (isGstInclusive) {
+            // GST-Inclusive calculations
+            const originalLineTotal = item.quantity * sellingPrice;
+            lineDiscount = originalLineTotal * (discPct / 100);
+            lineTotal = originalLineTotal - lineDiscount;
 
-        // Deduct Medicine Master current stock
-        medicine.currentStock = Math.max(0, medicine.currentStock - item.quantity);
-        await medicine.save({ session });
-
-        // Item Price calculations
-        const sellingPrice = item.sellingPrice || medicine.sellingPrice;
-        const mrp = item.mrp || medicine.mrp;
-        const gstPct = medicine.gstPercentage || 0;
-        const discPct = item.discountPercentage || 0;
-
-        let lineSubtotal = 0;
-        let lineGst = 0;
-        let lineDiscount = 0;
-        let lineTotal = 0;
-
-        if (isGstInclusive) {
-          // GST-Inclusive calculations
-          const originalLineTotal = item.quantity * sellingPrice;
-          lineDiscount = originalLineTotal * (discPct / 100);
-          lineTotal = originalLineTotal - lineDiscount;
-
-          // Back-calculate taxable value and gst amount
-          const taxableValue = lineTotal / (1 + gstPct / 100);
-          lineGst = lineTotal - taxableValue;
-          lineSubtotal = taxableValue;
-        } else {
-          // GST-Exclusive calculations
-          const baseTotal = item.quantity * sellingPrice;
-          lineDiscount = baseTotal * (discPct / 100);
-          const taxableValue = baseTotal - lineDiscount;
-          lineGst = taxableValue * (gstPct / 100);
-          lineTotal = taxableValue + lineGst;
-          lineSubtotal = taxableValue;
-        }
-
-        subtotal += lineSubtotal;
-        gstAmount += lineGst;
-
-        saleItemsData.push({
-          medicineId: medicine._id,
-          medicineName: medicine.medicineName,
-          medicineCode: medicine.medicineCode,
-          hsnCode: medicine.hsnCode || '',
-          unitType: medicine.unitType,
-          quantity: item.quantity,
-          sellingPrice,
-          mrp,
-          gstPercentage: gstPct,
-          gstAmount: Math.round(lineGst * 100) / 100,
-          discountPercentage: discPct,
-          discountAmount: Math.round(lineDiscount * 100) / 100,
-          lineTotal: Math.round(lineTotal * 100) / 100,
-          batches: consumedBatches
-        });
-      }
-
-      // Grand total computations before overall discount
-      let grandTotal = subtotal + gstAmount;
-
-      // Handle overall discount
-      let finalDiscountAmount = 0;
-      if (discountType === 'Percentage' && discountValue > 0) {
-        finalDiscountAmount = grandTotal * (discountValue / 100);
-      } else if (discountType === 'Fixed' && discountValue > 0) {
-        finalDiscountAmount = discountValue;
-      }
-      grandTotal = Math.max(0, grandTotal - finalDiscountAmount);
-
-      // Handle Loyalty points redemption
-      let loyaltyRedemptionValue = 0;
-      let loyaltyPointsRedeemed = 0;
-      if (redeemLoyalty && customer.customerType === 'Registered' && customer.loyaltyPoints > 0) {
-        const pointsRate = getSetting('LOYALTY_REDEMPTION_RATE', 1);
-        const maxRedemptionValue = customer.loyaltyPoints * pointsRate;
-        
-        loyaltyRedemptionValue = Math.min(grandTotal, maxRedemptionValue);
-        loyaltyPointsRedeemed = Math.ceil(loyaltyRedemptionValue / pointsRate);
-
-        grandTotal = Math.max(0, grandTotal - loyaltyRedemptionValue);
-
-        // Deduct points
-        const oldPoints = customer.loyaltyPoints;
-        customer.loyaltyPoints -= loyaltyPointsRedeemed;
-        await customer.save({ session });
-
-        // Loyalty ledger entry
-        const loyLed = new LoyaltyLedger({
-          customerId: customer._id,
-          transactionType: 'Redeemed',
-          points: -loyaltyPointsRedeemed,
-          runningBalance: customer.loyaltyPoints,
-          referenceNumber: invoiceNumber,
-          remarks: `Redeemed ${loyaltyPointsRedeemed} points for Invoice discount of ₹${loyaltyRedemptionValue}`
-        });
-        // We will save ref id once sale is created
-        loyLed.referenceId = new mongoose.Types.ObjectId(); // temporary
-        await loyLed.save({ session });
-      }
-
-      // Calculate Loyalty earned (1 point per ₹100 post-discount taxable amount)
-      let loyaltyPointsEarned = 0;
-      if (customer.customerType === 'Registered') {
-        const earnRate = getSetting('LOYALTY_EARN_RATE', 100);
-        loyaltyPointsEarned = Math.floor(grandTotal / earnRate);
-
-        if (loyaltyPointsEarned > 0) {
-          customer.loyaltyPoints += loyaltyPointsEarned;
-          await customer.save({ session });
-
-          const loyLed = new LoyaltyLedger({
-            customerId: customer._id,
-            transactionType: 'Earned',
-            points: loyaltyPointsEarned,
-            runningBalance: customer.loyaltyPoints,
-            referenceNumber: invoiceNumber,
-            remarks: `Earned ${loyaltyPointsEarned} points for Purchase Invoice ${invoiceNumber}`
-          });
-          loyLed.referenceId = new mongoose.Types.ObjectId(); // temporary
-          await loyLed.save({ session });
-        }
-      }
-
-      // Outstanding and Credit days check
-      let paid = 0;
-      let pending = 0;
-      let due = null;
-
-      if (paymentMethod === 'Credit') {
-        pending = grandTotal;
-        paid = 0;
-
-        // Credit control validation check
-        const allowedCreditLimit = customer.creditLimit || 5000;
-        if (customer.outstandingBalance + grandTotal > allowedCreditLimit) {
-          if (!adminOverrideUsed) {
-            throw new Error(`Transaction BLOCKED: Customer credit limit exceeded (Allowed: ₹${allowedCreditLimit}, Current outstanding: ₹${customer.outstandingBalance}, Trying to bill: ₹${grandTotal})`);
+            // Back-calculate taxable value and gst amount
+            const taxableValue = lineTotal / (1 + gstPct / 100);
+            lineGst = lineTotal - taxableValue;
+            lineSubtotal = taxableValue;
           } else {
-            // Check override reason
-            if (!adminOverrideReason) {
-              throw new Error('Admin override reason is required to bypass customer credit limits.');
-            }
-          }
-        }
-
-        // Calculate due date
-        const creditDaysAllowed = customer.creditDays || 30;
-        due = new Date(Date.now() + creditDaysAllowed * 24 * 60 * 60 * 1000);
-
-        // Update customer outstanding balance
-        const oldOutstanding = customer.outstandingBalance;
-        customer.outstandingBalance = Math.round((customer.outstandingBalance + grandTotal) * 100) / 100;
-        await customer.save({ session });
-
-        // Log Customer Ledger
-        const custLed = new CustomerLedger({
-          customerId: customer._id,
-          transactionType: 'Sale',
-          referenceNumber: invoiceNumber,
-          debit: grandTotal,
-          credit: 0,
-          runningBalance: customer.outstandingBalance,
-          remarks: `Credit sale invoice entry ${invoiceNumber}`
-        });
-        custLed.referenceId = new mongoose.Types.ObjectId(); // temporary
-        await custLed.save({ session });
-
-        if (adminOverrideUsed) {
-          await CustomerActivity.create([{
-            customerId: customer._id,
-            action: 'Credit Limit Overridden',
-            description: `Bypassed credit limit block for ₹${grandTotal}. Reason: ${adminOverrideReason}`,
-            beforeValues: { outstandingBalance: oldOutstanding },
-            afterValues: { outstandingBalance: customer.outstandingBalance },
-            performedBy: req.user.id
-          }], { session });
-        }
-
-      } else if (paymentMethod === 'Mixed') {
-        paid = Number(paymentDetails.cashAmount || 0) + Number(paymentDetails.upiAmount || 0) + Number(paymentDetails.cardAmount || 0);
-        pending = Math.max(0, grandTotal - paid);
-        if (pending > 0) {
-          // Rest goes to credit outstanding
-          const allowedCreditLimit = customer.creditLimit || 5000;
-          if (customer.outstandingBalance + pending > allowedCreditLimit) {
-            if (!adminOverrideUsed) {
-              throw new Error(`Transaction BLOCKED: Customer credit limit exceeded on unpaid mixed balance`);
-            }
+            // GST-Exclusive calculations
+            const baseTotal = item.quantity * sellingPrice;
+            lineDiscount = baseTotal * (discPct / 100);
+            const taxableValue = baseTotal - lineDiscount;
+            lineGst = taxableValue * (gstPct / 100);
+            lineTotal = taxableValue + lineGst;
+            lineSubtotal = taxableValue;
           }
 
-          const creditDaysAllowed = customer.creditDays || 30;
-          due = new Date(Date.now() + creditDaysAllowed * 24 * 60 * 60 * 1000);
+          subtotal += lineSubtotal;
+          gstAmount += lineGst;
 
-          customer.outstandingBalance = Math.round((customer.outstandingBalance + pending) * 100) / 100;
-          await customer.save({ session });
-
-          const custLed = new CustomerLedger({
-            customerId: customer._id,
-            transactionType: 'Sale',
-            referenceNumber: invoiceNumber,
-            debit: pending,
-            credit: 0,
-            runningBalance: customer.outstandingBalance,
-            remarks: `Mixed payment credit sale balance ${invoiceNumber}`
+          saleItemsData.push({
+            medicineId: medicine._id,
+            medicineName: medicine.medicineName,
+            medicineCode: medicine.medicineCode,
+            hsnCode: medicine.hsnCode || '',
+            unitType: medicine.unitType,
+            quantity: item.quantity,
+            sellingPrice,
+            mrp,
+            gstPercentage: gstPct,
+            gstAmount: Math.round(lineGst * 100) / 100,
+            discountPercentage: discPct,
+            discountAmount: Math.round(lineDiscount * 100) / 100,
+            lineTotal: Math.round(lineTotal * 100) / 100,
+            batches: consumedBatches
           });
-          custLed.referenceId = new mongoose.Types.ObjectId(); // temporary
-          await custLed.save({ session });
         }
-      } else {
-        // Paid in full
-        paid = grandTotal;
-        pending = 0;
-      }
 
-      // Create Sale Document
-      const sale = new Sale({
-        invoiceNumber,
-        customerId: customer._id,
-        customerName: customer.name,
-        customerPhone: customer.phone,
-        isGstInclusive,
-        subtotal: Math.round(subtotal * 100) / 100,
-        discountType,
-        discountValue,
-        discountAmount: Math.round(finalDiscountAmount * 100) / 100,
-        gstAmount: Math.round(gstAmount * 100) / 100,
-        grandTotal: Math.round(grandTotal * 100) / 100,
-        paidAmount: Math.round(paid * 100) / 100,
-        pendingAmount: Math.round(pending * 100) / 100,
-        paymentMethod,
-        paymentDetails: {
-          cashAmount: paymentDetails.cashAmount || (paymentMethod === 'Cash' ? grandTotal : 0),
-          upiAmount: paymentDetails.upiAmount || (paymentMethod === 'UPI' ? grandTotal : 0),
-          cardAmount: paymentDetails.cardAmount || (paymentMethod === 'Card' ? grandTotal : 0),
-          creditAmount: paymentDetails.creditAmount || (paymentMethod === 'Credit' ? grandTotal : pending)
-        },
-        dueDate: due,
-        creditDays: paymentMethod === 'Credit' || paymentMethod === 'Mixed' ? creditDays || customer.creditDays : 0,
-        billingCounter,
-        orderSource,
-        prescriptionNumber,
-        prescriptionDocumentUrl,
-        linkedPrescriptionIds: linkedPrescriptions,
-        complianceVerifiedBy: req.body.complianceVerifiedBy || req.user.id,
-        complianceVerifiedAt: rxReqFound ? new Date() : null,
-        invoiceStatus: 'Completed',
-        loyaltyPointsEarned,
-        loyaltyPointsRedeemed,
-        remarks,
-        adminOverrideUsed,
-        adminOverrideReason,
-        idempotencyKey,
-        createdBy: req.user.id
-      });
-      await sale.save({ session });
+        // Grand total computations before overall discount
+        let grandTotal = subtotal + gstAmount;
 
-      // Save prescription usages inside transaction
-      if (prescriptionUsagesToCreate.length > 0) {
-        const PrescriptionUsage = require('../models/PrescriptionUsage');
-        const usages = prescriptionUsagesToCreate.map(u => ({
-          ...u,
-          saleId: sale._id,
+        // Handle overall discount
+        let finalDiscountAmount = 0;
+        if (discountType === 'Percentage' && discountValue > 0) {
+          finalDiscountAmount = grandTotal * (discountValue / 100);
+        } else if (discountType === 'Fixed' && discountValue > 0) {
+          finalDiscountAmount = discountValue;
+        }
+        grandTotal = Math.max(0, grandTotal - finalDiscountAmount);
+
+        // Handle Loyalty points redemption & earnings & credit checks
+        let loyaltyRedemptionValue = 0;
+        let loyaltyPointsRedeemed = 0;
+        let loyaltyPointsEarned = 0;
+        let paid = 0;
+        let pending = 0;
+        let due = null;
+
+        if (invoiceStatus !== 'Draft') {
+          if (redeemLoyalty && customer.customerType === 'Registered' && customer.loyaltyPoints > 0) {
+            const pointsRate = getSetting('LOYALTY_REDEMPTION_RATE', 1);
+            const maxRedemptionValue = customer.loyaltyPoints * pointsRate;
+
+            loyaltyRedemptionValue = Math.min(grandTotal, maxRedemptionValue);
+            loyaltyPointsRedeemed = Math.ceil(loyaltyRedemptionValue / pointsRate);
+
+            grandTotal = Math.max(0, grandTotal - loyaltyRedemptionValue);
+
+            // Deduct points
+            customer.loyaltyPoints -= loyaltyPointsRedeemed;
+            await customer.save({ session });
+
+            // Loyalty ledger entry
+            const loyLed = new LoyaltyLedger({
+              customerId: customer._id,
+              transactionType: 'Redeemed',
+              points: -loyaltyPointsRedeemed,
+              runningBalance: customer.loyaltyPoints,
+              referenceNumber: invoiceNumber,
+              remarks: `Redeemed ${loyaltyPointsRedeemed} points for Invoice discount of ₹${loyaltyRedemptionValue}`
+            });
+            loyLed.referenceId = new mongoose.Types.ObjectId(); // temporary
+            await loyLed.save({ session });
+            createdDocs.push(loyLed);
+          }
+
+          // Calculate Loyalty earned (1 point per ₹100 post-discount taxable amount)
+          if (customer.customerType === 'Registered') {
+            const earnRate = getSetting('LOYALTY_EARN_RATE', 100);
+            loyaltyPointsEarned = Math.floor(grandTotal / earnRate);
+
+            if (loyaltyPointsEarned > 0) {
+              customer.loyaltyPoints += loyaltyPointsEarned;
+              await customer.save({ session });
+
+              const loyLed = new LoyaltyLedger({
+                customerId: customer._id,
+                transactionType: 'Earned',
+                points: loyaltyPointsEarned,
+                runningBalance: customer.loyaltyPoints,
+                referenceNumber: invoiceNumber,
+                remarks: `Earned ${loyaltyPointsEarned} points for Purchase Invoice ${invoiceNumber}`
+              });
+              loyLed.referenceId = new mongoose.Types.ObjectId(); // temporary
+              await loyLed.save({ session });
+              createdDocs.push(loyLed);
+            }
+          }
+
+          if (paymentMethod === 'Credit') {
+            pending = grandTotal;
+            paid = 0;
+
+            // Credit control validation check
+            const allowedCreditLimit = customer.creditLimit || 5000;
+            if (customer.outstandingBalance + grandTotal > allowedCreditLimit) {
+              if (!adminOverrideUsed) {
+                throw new Error(`Transaction BLOCKED: Customer credit limit exceeded (Allowed: ₹${allowedCreditLimit}, Current outstanding: ₹${customer.outstandingBalance}, Trying to bill: ₹${grandTotal})`);
+              } else {
+                // Check override reason
+                if (!adminOverrideReason) {
+                  throw new Error('Admin override reason is required to bypass customer credit limits.');
+                }
+              }
+            }
+
+            // Calculate due date
+            const creditDaysAllowed = customer.creditDays || 30;
+            due = new Date(Date.now() + creditDaysAllowed * 24 * 60 * 60 * 1000);
+
+            // Update customer outstanding balance
+            const oldOutstanding = customer.outstandingBalance;
+            customer.outstandingBalance = Math.round((customer.outstandingBalance + grandTotal) * 100) / 100;
+            await customer.save({ session });
+
+            // Log Customer Ledger
+            const custLed = new CustomerLedger({
+              customerId: customer._id,
+              transactionType: 'Sale',
+              referenceNumber: invoiceNumber,
+              debit: grandTotal,
+              credit: 0,
+              runningBalance: customer.outstandingBalance,
+              remarks: `Credit sale invoice entry ${invoiceNumber}`
+            });
+            custLed.referenceId = new mongoose.Types.ObjectId(); // temporary
+            await custLed.save({ session });
+            createdDocs.push(custLed);
+
+            if (adminOverrideUsed) {
+              const createdActs = await CustomerActivity.create([{
+                customerId: customer._id,
+                action: 'Credit Limit Overridden',
+                description: `Bypassed credit limit block for ₹${grandTotal}. Reason: ${adminOverrideReason}`,
+                beforeValues: { outstandingBalance: oldOutstanding },
+                afterValues: { outstandingBalance: customer.outstandingBalance },
+                performedBy: req.user.id
+              }], { session });
+              createdDocs.push(...createdActs);
+            }
+
+          } else if (paymentMethod === 'Mixed') {
+            paid = Number(paymentDetails.cashAmount || 0) + Number(paymentDetails.upiAmount || 0) + Number(paymentDetails.cardAmount || 0);
+            pending = Math.max(0, grandTotal - paid);
+            if (pending > 0) {
+              // Rest goes to credit outstanding
+              const allowedCreditLimit = customer.creditLimit || 5000;
+              if (customer.outstandingBalance + pending > allowedCreditLimit) {
+                if (!adminOverrideUsed) {
+                  throw new Error(`Transaction BLOCKED: Customer credit limit exceeded on unpaid mixed balance`);
+                }
+              }
+
+              const creditDaysAllowed = customer.creditDays || 30;
+              due = new Date(Date.now() + creditDaysAllowed * 24 * 60 * 60 * 1000);
+
+              customer.outstandingBalance = Math.round((customer.outstandingBalance + pending) * 100) / 100;
+              await customer.save({ session });
+
+              const custLed = new CustomerLedger({
+                customerId: customer._id,
+                transactionType: 'Sale',
+                referenceNumber: invoiceNumber,
+                debit: pending,
+                credit: 0,
+                runningBalance: customer.outstandingBalance,
+                remarks: `Mixed payment credit sale balance ${invoiceNumber}`
+              });
+              custLed.referenceId = new mongoose.Types.ObjectId(); // temporary
+              await custLed.save({ session });
+              createdDocs.push(custLed);
+            }
+          } else {
+            // Paid in full
+            paid = grandTotal;
+            pending = 0;
+          }
+        }
+
+        const saleData = {
+          invoiceNumber,
+          customerId: customer._id,
+          customerName: customer.name,
+          customerPhone: customer.phone,
+          isGstInclusive,
+          subtotal: Math.round(subtotal * 100) / 100,
+          discountType,
+          discountValue,
+          discountAmount: Math.round(finalDiscountAmount * 100) / 100,
+          gstAmount: Math.round(gstAmount * 100) / 100,
+          grandTotal: Math.round(grandTotal * 100) / 100,
+          paidAmount: Math.round(paid * 100) / 100,
+          pendingAmount: Math.round(pending * 100) / 100,
+          paymentMethod,
+          paymentDetails: {
+            cashAmount: paymentDetails.cashAmount || (paymentMethod === 'Cash' ? grandTotal : 0),
+            upiAmount: paymentDetails.upiAmount || (paymentMethod === 'UPI' ? grandTotal : 0),
+            cardAmount: paymentDetails.cardAmount || (paymentMethod === 'Card' ? grandTotal : 0),
+            creditAmount: paymentDetails.creditAmount || (paymentMethod === 'Credit' ? grandTotal : pending)
+          },
+          dueDate: due,
+          creditDays: paymentMethod === 'Credit' || paymentMethod === 'Mixed' ? creditDays || customer.creditDays : 0,
+          billingCounter,
+          orderSource,
+          prescriptionNumber,
+          prescriptionDocumentUrl,
+          linkedPrescriptionIds: linkedPrescriptions,
+          complianceVerifiedBy: req.body.complianceVerifiedBy || req.user.id,
+          complianceVerifiedAt: rxReqFound ? new Date() : null,
+          invoiceStatus: invoiceStatus || 'Completed',
+          expiresAt: invoiceStatus === 'Draft' ? new Date(Date.now() + 15 * 60 * 1000) : null,
+          loyaltyPointsEarned: invoiceStatus === 'Draft' ? 0 : loyaltyPointsEarned,
+          loyaltyPointsRedeemed: invoiceStatus === 'Draft' ? 0 : loyaltyPointsRedeemed,
+          remarks,
+          adminOverrideUsed,
+          adminOverrideReason,
+          idempotencyKey,
           createdBy: req.user.id
-        }));
-        await PrescriptionUsage.insertMany(usages, { session });
-      }
+        };
 
-      // Generate compliance audit log if restricted medicines were sold
-      if (rxReqFound) {
+        let sale;
+        if (draftSale) {
+          sale = draftSale;
+          sale.set(saleData);
+        } else {
+          sale = new Sale(saleData);
+        }
+        await sale.save({ session });
+        createdDocs.push(sale);
+
+        // Save prescription usages inside transaction
+        if (prescriptionUsagesToCreate.length > 0) {
+          const PrescriptionUsage = require('../models/PrescriptionUsage');
+          const usages = prescriptionUsagesToCreate.map(u => ({
+            ...u,
+            saleId: sale._id,
+            createdBy: req.user.id
+          }));
+          const savedUsages = await PrescriptionUsage.insertMany(usages, { session });
+          createdDocs.push(...savedUsages);
+        }
+
+        // Generate compliance audit log if restricted medicines were sold
+        if (rxReqFound) {
+          await logAudit(
+            req.user.id,
+            'Compliance POS Checkout',
+            'Sale',
+            sale._id,
+            null,
+            { linkedPrescriptionIds: linkedPrescriptions },
+            req.ip || '127.0.0.1',
+            session
+          );
+        }
+
+        // Save sale items
+        const finalItems = saleItemsData.map(item => ({
+          ...item,
+          saleId: sale._id
+        }));
+        const savedSaleItems = await SaleItem.insertMany(finalItems, { session });
+        createdDocs.push(...savedSaleItems);
+
+        // Update temporary IDs in Ledgers
+        await LoyaltyLedger.updateMany({ referenceNumber: invoiceNumber }, { referenceId: sale._id }, { session });
+        await CustomerLedger.updateMany({ referenceNumber: invoiceNumber }, { referenceId: sale._id }, { session });
+
+        // Trigger analytics updates in background
+        const createdActs = await CustomerActivity.create([{
+          customerId: customer._id,
+          action: 'Invoice Created',
+          description: `Billed Invoice #${invoiceNumber} for ₹${grandTotal}`,
+          performedBy: req.user.id
+        }], { session });
+        createdDocs.push(...createdActs);
+
         await logAudit(
           req.user.id,
-          'Compliance POS Checkout',
+          'Sale Invoice Completed',
           'Sale',
           sale._id,
           null,
-          { linkedPrescriptionIds: linkedPrescriptions },
-          req.ip || '127.0.0.1',
+          { invoiceNumber, grandTotal, paymentMethod },
+          req.ip,
           session
         );
+
+        return sale;
+
+      } catch (err) {
+        // Application-level compensation (manual rollback) for standalone MongoDB deployments
+        const { getStatus } = require('../config/TransactionManager');
+        const hasTxSupport = getStatus().transactionSupport;
+        if (!hasTxSupport) {
+          logger.warn(`Stand-alone database rollback: compensating createSale failure for invoice ${invoiceNumber || 'N/A'}...`);
+
+          // 1. Delete created documents in reverse order to prevent orphans
+          for (let i = createdDocs.length - 1; i >= 0; i--) {
+            try {
+              const doc = createdDocs[i];
+              await doc.constructor.deleteOne({ _id: doc._id });
+            } catch (delErr) {
+              logger.error(`Manual Rollback ERROR: Failed to delete doc from ${createdDocs[i].constructor.modelName}: ${delErr.message}`);
+            }
+          }
+
+          // 2. Restore modified inventory batches
+          for (const b of originalBatches) {
+            try {
+              await InventoryBatch.updateOne(
+                { _id: b.id },
+                { $set: { 
+                  availableQuantity: b.availableQuantity, 
+                  status: b.status, 
+                  isSaleBlocked: b.isSaleBlocked,
+                  reservedQuantity: b.reservedQuantity
+                } }
+              );
+            } catch (bErr) {
+              logger.error(`Manual Rollback ERROR: Failed to restore InventoryBatch ${b.id}: ${bErr.message}`);
+            }
+          }
+
+          // 3. Restore medicine currentStock levels
+          for (const m of originalMedicines) {
+            try {
+              await Medicine.updateOne(
+                { _id: m.id },
+                { $set: { currentStock: m.currentStock } }
+              );
+            } catch (mErr) {
+              logger.error(`Manual Rollback ERROR: Failed to restore Medicine ${m.id}: ${mErr.message}`);
+            }
+          }
+
+          // 4. Restore prescription consumption quotas
+          for (const p of originalPrescriptions) {
+            try {
+              const Prescription = require('../models/Prescription');
+              await Prescription.updateOne(
+                { _id: p.id },
+                { $set: { medicines: p.medicines, lastUsedAt: p.lastUsedAt } }
+              );
+            } catch (pErr) {
+              logger.error(`Manual Rollback ERROR: Failed to restore Prescription ${p.id}: ${pErr.message}`);
+            }
+          }
+
+          // 5. Restore customer outstanding balance and loyalty points
+          if (originalCustomer) {
+            try {
+              await Customer.updateOne(
+                { _id: originalCustomer.id },
+                { $set: { outstandingBalance: originalCustomer.outstandingBalance, loyaltyPoints: originalCustomer.loyaltyPoints } }
+              );
+            } catch (cErr) {
+              logger.error(`Manual Rollback ERROR: Failed to restore Customer ${originalCustomer.id}: ${cErr.message}`);
+            }
+          }
+        }
+        throw err;
       }
-
-      // Save sale items
-      const finalItems = saleItemsData.map(item => ({
-        ...item,
-        saleId: sale._id
-      }));
-      await SaleItem.insertMany(finalItems, { session });
-
-      // Update temporary IDs in Ledgers
-      await LoyaltyLedger.updateMany({ referenceNumber: invoiceNumber }, { referenceId: sale._id }, { session });
-      await CustomerLedger.updateMany({ referenceNumber: invoiceNumber }, { referenceId: sale._id }, { session });
-
-      // Trigger analytics updates in background
-      await CustomerActivity.create([{
-        customerId: customer._id,
-        action: 'Invoice Created',
-        description: `Billed Invoice #${invoiceNumber} for ₹${grandTotal}`,
-        performedBy: req.user.id
-      }], { session });
-
-      await logAudit(
-        req.user.id,
-        'Sale Invoice Completed',
-        'Sale',
-        sale._id,
-        null,
-        { invoiceNumber, grandTotal, paymentMethod },
-        req.ip,
-        session
-      );
-
-      return sale;
     });
 
     res.status(201).json({
@@ -840,177 +1048,284 @@ const createSalesReturn = async (req, res, next) => {
     const returnNumber = await getNextSequence('salesReturnNumber', prefix);
 
     const result = await runInTransaction(async (session) => {
-      let subtotal = 0;
-      let gstAmount = 0;
-      let refundAmount = 0;
-      const returnItemsData = [];
+      // Track original states and created documents for manual rollback if standalone MongoDB fails
+      const createdDocs = [];
+      const originalBatches = [];
+      const originalMedicines = [];
+      const originalSaleStatus = { id: sale._id, invoiceStatus: sale.invoiceStatus };
+      let originalCustomer = null;
 
-      const customer = await Customer.findById(sale.customerId).session(session);
+      try {
+        let subtotal = 0;
+        let gstAmount = 0;
+        let refundAmount = 0;
+        const returnItemsData = [];
 
-      for (const item of items) {
-        const saleItem = await SaleItem.findOne({ saleId: sale._id, medicineId: item.medicineId }).session(session);
-        if (!saleItem) {
-          throw new Error(`Item ${item.medicineId} was not part of the original sale invoice`);
-        }
-
-        // Validate return quantity against original quantity sold
-        if (item.quantity > saleItem.quantity) {
-          throw new Error(`Return quantity (${item.quantity}) exceeds originally sold quantity (${saleItem.quantity})`);
-        }
-
-        // Restore Stock to batches FIFO style based on what was sold
-        let remainingToReturn = item.quantity;
-        const restoredBatches = [];
-
-        for (const saleBatch of saleItem.batches) {
-          if (remainingToReturn <= 0) break;
-
-          const restoreQty = Math.min(saleBatch.quantity, remainingToReturn);
-          const batch = await InventoryBatch.findById(saleBatch.inventoryBatchId).session(session);
-          if (batch) {
-            batch.availableQuantity = Math.round((batch.availableQuantity + restoreQty) * 100) / 100;
-            if (batch.status === 'Sold Out') {
-              batch.status = 'Active';
-              batch.isSaleBlocked = false;
-            }
-            await batch.save({ session });
-
-            restoredBatches.push({
-              inventoryBatchId: batch._id,
-              batchNumber: batch.batchNumber,
-              quantity: restoreQty
-            });
-
-            // Log activity
-            const invAct = new InventoryActivity({
-              inventoryBatchId: batch._id,
-              action: 'Sale Return',
-              description: `Restored ${restoreQty} units via Sales Return ${returnNumber}`,
-              performedBy: req.user.id
-            });
-            await invAct.save({ session });
-          }
-          remainingToReturn -= restoreQty;
-        }
-
-        // Restore Medicine master stock
-        const medicine = await Medicine.findById(item.medicineId).session(session);
-        if (medicine) {
-          medicine.currentStock = Math.max(0, medicine.currentStock + item.quantity);
-          await medicine.save({ session });
-        }
-
-        // Calculate refund pricing
-        const price = saleItem.sellingPrice;
-        const itemSubtotal = item.quantity * price / (1 + (saleItem.gstPercentage / 100));
-        const itemGst = item.quantity * price - itemSubtotal;
-        const itemTotal = item.quantity * price;
-
-        subtotal += itemSubtotal;
-        gstAmount += itemGst;
-        refundAmount += itemTotal;
-
-        returnItemsData.push({
-          medicineId: item.medicineId,
-          quantity: item.quantity,
-          sellingPrice: price,
-          gstPercentage: saleItem.gstPercentage,
-          gstAmount: Math.round(itemGst * 100) / 100,
-          lineTotal: Math.round(itemTotal * 100) / 100,
-          batches: restoredBatches
-        });
-      }
-
-      // Create Sales Return record
-      const salesReturn = new SalesReturn({
-        returnNumber,
-        saleId: sale._id,
-        returnDate: returnDate || new Date(),
-        customerId: sale.customerId,
-        subtotal: Math.round(subtotal * 100) / 100,
-        gstAmount: Math.round(gstAmount * 100) / 100,
-        refundAmount: Math.round(refundAmount * 100) / 100,
-        paymentMethod: sale.paymentMethod === 'Credit' ? 'Credit Adjustment' : 'Cash',
-        remarks,
-        createdBy: req.user.id
-      });
-      await salesReturn.save({ session });
-
-      // Save return items
-      const finalReturnItems = returnItemsData.map(item => ({
-        ...item,
-        salesReturnId: salesReturn._id
-      }));
-      await SalesReturnItem.insertMany(finalReturnItems, { session });
-
-      // Adjust customer balance / outstanding
-      if (sale.paymentMethod === 'Credit' || (sale.paymentMethod === 'Mixed' && sale.pendingAmount > 0)) {
-        // Credit adjustment: reduce customer outstanding balance
+        const customer = await Customer.findById(sale.customerId).session(session);
         if (customer) {
-          const oldOutstanding = customer.outstandingBalance;
-          customer.outstandingBalance = Math.max(0, Math.round((customer.outstandingBalance - refundAmount) * 100) / 100);
-          await customer.save({ session });
-
-          const custLed = new CustomerLedger({
-            customerId: customer._id,
-            transactionType: 'Sale Return',
-            referenceId: salesReturn._id,
-            referenceNumber: returnNumber,
-            debit: 0,
-            credit: refundAmount,
-            runningBalance: customer.outstandingBalance,
-            remarks: `Credit reduction for Return ${returnNumber}`
-          });
-          await custLed.save({ session });
-
-          await CustomerActivity.create([{
-            customerId: customer._id,
-            action: 'Outstanding Reverted',
-            description: `Outstanding debt reduced by ₹${refundAmount} via Sales Return ${returnNumber}`,
-            beforeValues: { outstandingBalance: oldOutstanding },
-            afterValues: { outstandingBalance: customer.outstandingBalance },
-            performedBy: req.user.id
-          }], { session });
+          originalCustomer = {
+            id: customer._id,
+            outstandingBalance: customer.outstandingBalance,
+            loyaltyPoints: customer.loyaltyPoints
+          };
         }
-      }
 
-      // Deduct loyalty points accrued on returned items
-      if (customer && customer.customerType === 'Registered') {
-        const earnRate = getSetting('LOYALTY_EARN_RATE', 100);
-        const pointsToDeduct = Math.floor(refundAmount / earnRate);
-        if (pointsToDeduct > 0) {
-          customer.loyaltyPoints = Math.max(0, customer.loyaltyPoints - pointsToDeduct);
-          await customer.save({ session });
+        for (const item of items) {
+          const saleItem = await SaleItem.findOne({ saleId: sale._id, medicineId: item.medicineId }).session(session);
+          if (!saleItem) {
+            throw new Error(`Item ${item.medicineId} was not part of the original sale invoice`);
+          }
 
-          const loyLed = new LoyaltyLedger({
-            customerId: customer._id,
-            transactionType: 'Reverted',
-            points: -pointsToDeduct,
-            runningBalance: customer.loyaltyPoints,
-            referenceId: salesReturn._id,
-            referenceNumber: returnNumber,
-            remarks: `Points reversed due to Return ${returnNumber}`
+          // Calculate cumulative quantity already returned for this item to prevent over-returns
+          const previousReturns = await SalesReturn.find({ saleId: sale._id, isDeleted: false }).session(session);
+          const previousReturnIds = previousReturns.map(r => r._id);
+          const previousReturnItems = await SalesReturnItem.find({
+            salesReturnId: { $in: previousReturnIds },
+            medicineId: item.medicineId
+          }).session(session);
+          const alreadyReturnedQty = previousReturnItems.reduce((sum, rItem) => sum + rItem.quantity, 0);
+          const maxAllowedToReturn = saleItem.quantity - alreadyReturnedQty;
+
+          if (item.quantity > maxAllowedToReturn) {
+            throw new Error(`Return quantity (${item.quantity}) exceeds remaining returnable quantity (${maxAllowedToReturn}) for medicine "${saleItem.medicineName}"`);
+          }
+
+          // Restore Stock to batches FIFO style based on what was sold
+          let remainingToReturn = item.quantity;
+          const restoredBatches = [];
+
+          for (const saleBatch of saleItem.batches) {
+            if (remainingToReturn <= 0) break;
+
+            const restoreQty = Math.min(saleBatch.quantity, remainingToReturn);
+            const batch = await InventoryBatch.findById(saleBatch.inventoryBatchId).session(session);
+            if (batch) {
+              // Snapshot batch before update
+              originalBatches.push({
+                id: batch._id,
+                availableQuantity: batch.availableQuantity,
+                status: batch.status,
+                isSaleBlocked: batch.isSaleBlocked
+              });
+
+              batch.availableQuantity = Math.round((batch.availableQuantity + restoreQty) * 100) / 100;
+              if (batch.status === 'Sold Out') {
+                batch.status = 'Active';
+                batch.isSaleBlocked = false;
+              }
+              await batch.save({ session });
+
+              restoredBatches.push({
+                inventoryBatchId: batch._id,
+                batchNumber: batch.batchNumber,
+                quantity: restoreQty
+              });
+
+              // Log activity
+              const invAct = new InventoryActivity({
+                inventoryBatchId: batch._id,
+                action: 'Sale Return',
+                description: `Restored ${restoreQty} units via Sales Return ${returnNumber}`,
+                performedBy: req.user.id
+              });
+              await invAct.save({ session });
+              createdDocs.push(invAct);
+            }
+            remainingToReturn -= restoreQty;
+          }
+
+          // Restore Medicine master stock
+          const medicine = await Medicine.findById(item.medicineId).session(session);
+          if (medicine) {
+            originalMedicines.push({
+              id: medicine._id,
+              currentStock: medicine.currentStock
+            });
+            medicine.currentStock = Math.max(0, medicine.currentStock + item.quantity);
+            await medicine.save({ session });
+          }
+
+          // Calculate refund pricing
+          const price = saleItem.sellingPrice;
+          const itemSubtotal = item.quantity * price / (1 + (saleItem.gstPercentage / 100));
+          const itemGst = item.quantity * price - itemSubtotal;
+          const itemTotal = item.quantity * price;
+
+          subtotal += itemSubtotal;
+          gstAmount += itemGst;
+          refundAmount += itemTotal;
+
+          returnItemsData.push({
+            medicineId: item.medicineId,
+            quantity: item.quantity,
+            sellingPrice: price,
+            gstPercentage: saleItem.gstPercentage,
+            gstAmount: Math.round(itemGst * 100) / 100,
+            lineTotal: Math.round(itemTotal * 100) / 100,
+            batches: restoredBatches
           });
-          await loyLed.save({ session });
         }
+
+        // Create Sales Return record
+        const salesReturn = new SalesReturn({
+          returnNumber,
+          saleId: sale._id,
+          returnDate: returnDate || new Date(),
+          customerId: sale.customerId,
+          subtotal: Math.round(subtotal * 100) / 100,
+          gstAmount: Math.round(gstAmount * 100) / 100,
+          refundAmount: Math.round(refundAmount * 100) / 100,
+          paymentMethod: sale.paymentMethod === 'Credit' ? 'Credit Adjustment' : 'Cash',
+          remarks,
+          createdBy: req.user.id
+        });
+        await salesReturn.save({ session });
+        createdDocs.push(salesReturn);
+
+        // Save return items
+        const finalReturnItems = returnItemsData.map(item => ({
+          ...item,
+          salesReturnId: salesReturn._id
+        }));
+        const savedReturnItems = await SalesReturnItem.insertMany(finalReturnItems, { session });
+        createdDocs.push(...savedReturnItems);
+
+        // Adjust customer balance / outstanding
+        if (sale.paymentMethod === 'Credit' || (sale.paymentMethod === 'Mixed' && sale.pendingAmount > 0)) {
+          // Credit adjustment: reduce customer outstanding balance
+          if (customer) {
+            const oldOutstanding = customer.outstandingBalance;
+            customer.outstandingBalance = Math.max(0, Math.round((customer.outstandingBalance - refundAmount) * 100) / 100);
+            await customer.save({ session });
+
+            const custLed = new CustomerLedger({
+              customerId: customer._id,
+              transactionType: 'Sale Return',
+              referenceId: salesReturn._id,
+              referenceNumber: returnNumber,
+              debit: 0,
+              credit: refundAmount,
+              runningBalance: customer.outstandingBalance,
+              remarks: `Credit reduction for Return ${returnNumber}`
+            });
+            await custLed.save({ session });
+            createdDocs.push(custLed);
+
+            const createdActs = await CustomerActivity.create([{
+              customerId: customer._id,
+              action: 'Outstanding Reverted',
+              description: `Outstanding debt reduced by ₹${refundAmount} via Sales Return ${returnNumber}`,
+              beforeValues: { outstandingBalance: oldOutstanding },
+              afterValues: { outstandingBalance: customer.outstandingBalance },
+              performedBy: req.user.id
+            }], { session });
+            createdDocs.push(...createdActs);
+          }
+        }
+
+        // Deduct loyalty points accrued on returned items
+        if (customer && customer.customerType === 'Registered') {
+          const earnRate = getSetting('LOYALTY_EARN_RATE', 100);
+          const pointsToDeduct = Math.floor(refundAmount / earnRate);
+          if (pointsToDeduct > 0) {
+            customer.loyaltyPoints = Math.max(0, customer.loyaltyPoints - pointsToDeduct);
+            await customer.save({ session });
+
+            const loyLed = new LoyaltyLedger({
+              customerId: customer._id,
+              transactionType: 'Reverted',
+              points: -pointsToDeduct,
+              runningBalance: customer.loyaltyPoints,
+              referenceId: salesReturn._id,
+              referenceNumber: returnNumber,
+              remarks: `Points reversed due to Return ${returnNumber}`
+            });
+            await loyLed.save({ session });
+            createdDocs.push(loyLed);
+          }
+        }
+
+        // Mark original Sale status
+        sale.invoiceStatus = 'Returned';
+        await sale.save({ session });
+
+        await logAudit(
+          req.user.id,
+          'Sales Return Processed',
+          'SalesReturn',
+          salesReturn._id,
+          null,
+          { returnNumber, refundAmount },
+          req.ip,
+          session
+        );
+
+        return salesReturn;
+
+      } catch (err) {
+        const { getStatus } = require('../config/TransactionManager');
+        const hasTxSupport = getStatus().transactionSupport;
+        if (!hasTxSupport) {
+          logger.warn(`Stand-alone database rollback: compensating createSalesReturn failure for return ${returnNumber || 'N/A'}...`);
+
+          // 1. Delete created documents in reverse order to prevent orphans
+          for (let i = createdDocs.length - 1; i >= 0; i--) {
+            try {
+              const doc = createdDocs[i];
+              await doc.constructor.deleteOne({ _id: doc._id });
+            } catch (delErr) {
+              logger.error(`Manual Rollback ERROR: Failed to delete doc from ${createdDocs[i].constructor.modelName}: ${delErr.message}`);
+            }
+          }
+
+          // 2. Restore modified inventory batches
+          for (const b of originalBatches) {
+            try {
+              await InventoryBatch.updateOne(
+                { _id: b.id },
+                { $set: { availableQuantity: b.availableQuantity, status: b.status, isSaleBlocked: b.isSaleBlocked } }
+              );
+            } catch (bErr) {
+              logger.error(`Manual Rollback ERROR: Failed to restore InventoryBatch ${b.id}: ${bErr.message}`);
+            }
+          }
+
+          // 3. Restore medicine currentStock levels
+          for (const m of originalMedicines) {
+            try {
+              await Medicine.updateOne(
+                { _id: m.id },
+                { $set: { currentStock: m.currentStock } }
+              );
+            } catch (mErr) {
+              logger.error(`Manual Rollback ERROR: Failed to restore Medicine ${m.id}: ${mErr.message}`);
+            }
+          }
+
+          // 4. Restore customer balance and loyalty points
+          if (originalCustomer) {
+            try {
+              await Customer.updateOne(
+                { _id: originalCustomer.id },
+                { $set: { outstandingBalance: originalCustomer.outstandingBalance, loyaltyPoints: originalCustomer.loyaltyPoints } }
+              );
+            } catch (cErr) {
+              logger.error(`Manual Rollback ERROR: Failed to restore Customer ${originalCustomer.id}: ${cErr.message}`);
+            }
+          }
+
+          // 5. Restore original sale invoice status
+          try {
+            await Sale.updateOne(
+              { _id: originalSaleStatus.id },
+              { $set: { invoiceStatus: originalSaleStatus.invoiceStatus } }
+            );
+          } catch (sErr) {
+            logger.error(`Manual Rollback ERROR: Failed to restore Sale ${originalSaleStatus.id}: ${sErr.message}`);
+          }
+        }
+        throw err;
       }
-
-      // Mark original Sale status
-      sale.invoiceStatus = 'Returned';
-      await sale.save({ session });
-
-      await logAudit(
-        req.user.id,
-        'Sales Return Processed',
-        'SalesReturn',
-        salesReturn._id,
-        null,
-        { returnNumber, refundAmount },
-        req.ip,
-        session
-      );
-
-      return salesReturn;
     });
 
     res.status(201).json({
@@ -1616,7 +1931,7 @@ const createCashClosing = async (req, res, next) => {
           saleDate: { $gte: today },
           billingCounter,
           paymentMethod: 'Cash',
-          invoiceStatus: 'Completed',
+          invoiceStatus: { $in: ['Completed', 'Returned'] },
           isDeleted: false
         }
       },
@@ -1635,7 +1950,7 @@ const createCashClosing = async (req, res, next) => {
           saleDate: { $gte: today },
           billingCounter,
           paymentMethod: 'Mixed',
-          invoiceStatus: 'Completed',
+          invoiceStatus: { $in: ['Completed', 'Returned'] },
           isDeleted: false
         }
       },
@@ -1647,13 +1962,170 @@ const createCashClosing = async (req, res, next) => {
       }
     ]);
 
-    // Sum up cash refunds on returns today
+    // Sum up cash refunds on returns today (isolated by billingCounter)
     const returnsAggregate = await SalesReturn.aggregate([
       {
         $match: {
           returnDate: { $gte: today },
           paymentMethod: 'Cash',
           isDeleted: false
+        }
+      },
+      {
+        $lookup: {
+          from: 'sales',
+          localField: 'saleId',
+          foreignField: '_id',
+          as: 'saleInfo'
+        }
+      },
+      {
+        $unwind: '$saleInfo'
+      },
+      {
+        $match: {
+          'saleInfo.billingCounter': billingCounter
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalRefunds: { $sum: '$refundAmount' }
+        }
+      }
+    ]);
+
+    // Sum up UPI sales processed on this counter today
+    const upiSalesAggregate = await Sale.aggregate([
+      {
+        $match: {
+          saleDate: { $gte: today },
+          billingCounter,
+          paymentMethod: 'UPI',
+          invoiceStatus: { $in: ['Completed', 'Returned'] },
+          isDeleted: false
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalUPI: { $sum: '$grandTotal' }
+        }
+      }
+    ]);
+
+    // Sum up mixed payments UPI amounts
+    const mixedUpiAggregate = await Sale.aggregate([
+      {
+        $match: {
+          saleDate: { $gte: today },
+          billingCounter,
+          paymentMethod: 'Mixed',
+          invoiceStatus: { $in: ['Completed', 'Returned'] },
+          isDeleted: false
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalUPI: { $sum: '$paymentDetails.upiAmount' }
+        }
+      }
+    ]);
+
+    // Sum up Credit sales processed on this counter today
+    const creditSalesAggregate = await Sale.aggregate([
+      {
+        $match: {
+          saleDate: { $gte: today },
+          billingCounter,
+          paymentMethod: 'Credit',
+          invoiceStatus: { $in: ['Completed', 'Returned'] },
+          isDeleted: false
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalCredit: { $sum: '$grandTotal' }
+        }
+      }
+    ]);
+
+    // Sum up mixed payments Credit amounts
+    const mixedCreditAggregate = await Sale.aggregate([
+      {
+        $match: {
+          saleDate: { $gte: today },
+          billingCounter,
+          paymentMethod: 'Mixed',
+          invoiceStatus: { $in: ['Completed', 'Returned'] },
+          isDeleted: false
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalCredit: { $sum: '$paymentDetails.creditAmount' }
+        }
+      }
+    ]);
+
+    // Sum up UPI/Credit returns today (isolated by billingCounter)
+    const upiReturnsAggregate = await SalesReturn.aggregate([
+      {
+        $match: {
+          returnDate: { $gte: today },
+          paymentMethod: 'UPI',
+          isDeleted: false
+        }
+      },
+      {
+        $lookup: {
+          from: 'sales',
+          localField: 'saleId',
+          foreignField: '_id',
+          as: 'saleInfo'
+        }
+      },
+      {
+        $unwind: '$saleInfo'
+      },
+      {
+        $match: {
+          'saleInfo.billingCounter': billingCounter
+        }
+      },
+      {
+        $group: {
+          _id: null,
+          totalRefunds: { $sum: '$refundAmount' }
+        }
+      }
+    ]);
+
+    const creditReturnsAggregate = await SalesReturn.aggregate([
+      {
+        $match: {
+          returnDate: { $gte: today },
+          paymentMethod: 'Credit Adjustment',
+          isDeleted: false
+        }
+      },
+      {
+        $lookup: {
+          from: 'sales',
+          localField: 'saleId',
+          foreignField: '_id',
+          as: 'saleInfo'
+        }
+      },
+      {
+        $unwind: '$saleInfo'
+      },
+      {
+        $match: {
+          'saleInfo.billingCounter': billingCounter
         }
       },
       {
@@ -1666,8 +2138,12 @@ const createCashClosing = async (req, res, next) => {
 
     const cashSales = (salesAggregate[0] ? salesAggregate[0].totalCash : 0) + (mixedAggregate[0] ? mixedAggregate[0].totalCash : 0);
     const refunds = returnsAggregate[0] ? returnsAggregate[0].totalRefunds : 0;
-    const calculatedClosing = openingCash + cashSales - refunds;
+    const upiSales = (upiSalesAggregate[0] ? upiSalesAggregate[0].totalUPI : 0) + (mixedUpiAggregate[0] ? mixedUpiAggregate[0].totalUPI : 0);
+    const creditSales = (creditSalesAggregate[0] ? creditSalesAggregate[0].totalCredit : 0) + (mixedCreditAggregate[0] ? mixedCreditAggregate[0].totalCredit : 0);
+    const upiRefunds = upiReturnsAggregate[0] ? upiReturnsAggregate[0].totalRefunds : 0;
+    const creditRefunds = creditReturnsAggregate[0] ? creditReturnsAggregate[0].totalRefunds : 0;
 
+    const calculatedClosing = openingCash + cashSales - refunds;
     const variance = actualCashInDrawer - calculatedClosing;
 
     const closing = await CashClosing.create({
@@ -1691,13 +2167,34 @@ const createCashClosing = async (req, res, next) => {
       'CashClosing',
       closing._id,
       null,
-      { billingCounter, difference: variance },
+      { 
+        billingCounter, 
+        difference: variance,
+        cashSales,
+        upiSales,
+        creditSales,
+        refunds,
+        upiRefunds,
+        creditRefunds
+      },
       req.ip
     );
 
     res.status(201).json({
       success: true,
       closing,
+      details: {
+        cashSales,
+        upiSales,
+        creditSales,
+        refunds,
+        upiRefunds,
+        creditRefunds,
+        openingCash,
+        calculatedClosing,
+        actualCashInDrawer,
+        difference: variance
+      },
       message: `Cash closing logged. Drawer discrepancy variance: ₹${variance >= 0 ? '+' : ''}${variance}`
     });
 

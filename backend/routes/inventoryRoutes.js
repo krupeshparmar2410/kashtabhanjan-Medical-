@@ -13,6 +13,7 @@ const {
   getReportingData
 } = require('../controllers/inventoryController');
 const { protect } = require('../middleware/authMiddleware');
+const { authorize } = require('../middleware/roleMiddleware');
 
 // Protect all routes
 router.use(protect);
@@ -21,7 +22,7 @@ router.use(protect);
 router.get('/batches', getInventoryBatches);
 
 // Lock or unlock batch for sales
-router.put('/batches/:id/lock', toggleLock);
+router.put('/batches/:id/lock', authorize('admin', 'pharmacist'), toggleLock);
 
 // FEFO consumption lookup
 router.get('/fefo/:medicineId', getFEFOStock);
@@ -32,11 +33,11 @@ router.get('/valuation', getInventoryValuation);
 // Daily snapshot logs
 router.route('/snapshots')
   .get(getInventoryTrends)
-  .post(takeDailySnapshot);
+  .post(authorize('admin', 'pharmacist'), takeDailySnapshot);
 
 // Disposals & stock adjustments
-router.post('/dispose', disposeStock);
-router.post('/adjust', adjustInventory);
+router.post('/dispose', authorize('admin', 'pharmacist'), disposeStock);
+router.post('/adjust', authorize('admin', 'pharmacist'), adjustInventory);
 
 // Activities log audit timeline
 router.get('/activities', getRecentActivities);

@@ -32,17 +32,26 @@ const manualRestore = async () => {
     console.log('Connected to database successfully.');
 
     // Find admin operator
-    const admin = await User.findOne({ role: 'admin' });
+    let admin = await User.findOne({ isPrimaryAdmin: true });
+    let operatorId;
+    let operatorEmail;
+
     if (!admin) {
-      console.error('No admin user found in database to associate as restoration operator.');
-      process.exit(1);
+      operatorId = new mongoose.Types.ObjectId('000000000000000000000000'); // Static recovery operator ID
+      operatorEmail = 'system-recovery-mode@kashtbhanjan.com';
+      console.log('==================================================');
+      console.log('⚠ RUNNING IN SYSTEM RECOVERY MODE (EMPTY/CORRUPT DB)');
+      console.log('==================================================');
+    } else {
+      operatorId = admin._id;
+      operatorEmail = admin.email;
     }
 
     console.log(`Starting manual restore process for: ${fileName}`);
-    console.log('Operator:', admin.email);
+    console.log('Operator:', operatorEmail);
 
     // Call restore service (which automatically runs pre-restore rollback recovery and checks)
-    const result = await restoreFromBackup(admin._id, fileName, 'RESTORE SYSTEM STATE');
+    const result = await restoreFromBackup(operatorId, fileName, 'RESTORE SYSTEM STATE');
     
     console.log('Restoration result:', result.message);
     console.log('Database restore completed successfully.');

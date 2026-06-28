@@ -15,6 +15,12 @@ const checkPermission = (requiredPermission) => {
         'manage_recalls',
         'close_cash_counter'
       ],
+      pharmacist: [
+        'create_sale',
+        'process_return',
+        'edit_customer',
+        'close_cash_counter'
+      ],
       staff: [
         'create_sale',
         'edit_customer',

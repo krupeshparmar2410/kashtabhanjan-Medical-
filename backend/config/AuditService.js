@@ -22,7 +22,30 @@ const calculateBlockHash = (previousHash, actionType, module, entityId, newValue
 /**
  * Logs a system action with cryptographic chaining
  */
-const logSystemAction = async (req, {
+let writeQueue = Promise.resolve();
+
+const logSystemAction = async (req, params) => {
+  const currentQueue = writeQueue;
+  let resolveQueue;
+  writeQueue = new Promise((resolve) => {
+    resolveQueue = resolve;
+  });
+
+  try {
+    await currentQueue;
+  } catch (err) {
+    // Ignore error of previous queue item to avoid blocking subsequent writes
+  }
+
+  try {
+    const result = await logSystemActionInternal(req, params);
+    return result;
+  } finally {
+    resolveQueue();
+  }
+};
+
+const logSystemActionInternal = async (req, {
   actionType,
   module: logModule,
   entityType,
@@ -47,8 +70,8 @@ const logSystemAction = async (req, {
         performedBy = req.user._id || req.user.id;
         userRole = req.user.role || 'staff';
       }
-      ipAddress = req.ip || req.headers['x-forwarded-for'] || req.connection.remoteAddress || '127.0.0.1';
-      browserInfo = req.headers['user-agent'] || '';
+      ipAddress = req.ip || (req.headers && req.headers['x-forwarded-for']) || (req.connection && req.connection.remoteAddress) || '127.0.0.1';
+      browserInfo = (req.headers && req.headers['user-agent']) || '';
       requestMethod = req.method || '';
       endpoint = req.originalUrl || '';
     }

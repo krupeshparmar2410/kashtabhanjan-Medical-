@@ -98,7 +98,7 @@ const AuditLogsPage = () => {
                 logs.map((row) => (
                   <tr key={row._id} style={{ borderBottom: '1px solid #e2e8f0' }}>
                     <td style={{ padding: '12px' }}>{new Date(row.createdAt).toLocaleString()}</td>
-                    <td style={{ padding: '12px' }}><strong>{row.user?.name}</strong></td>
+                    <td style={{ padding: '12px' }}><strong>{row.performedBy?.name || row.user?.name || 'Deleted User'}</strong></td>
                     <td style={{ padding: '12px', fontWeight: 600 }}>{row.action}</td>
                     <td style={{ padding: '12px' }}>{row.entityType}</td>
                     <td style={{ padding: '12px' }}>{row.ipAddress || '127.0.0.1'}</td>

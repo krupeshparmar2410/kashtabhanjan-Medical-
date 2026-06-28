@@ -423,7 +423,7 @@ const CustomerDetails = () => {
                       <td style={{ padding: '8px' }}>{new Date(row.createdAt).toLocaleString()}</td>
                       <td style={{ padding: '8px' }}><strong>{row.action}</strong></td>
                       <td style={{ padding: '8px', color: '#475569' }}>{row.description}</td>
-                      <td style={{ padding: '8px' }}>{row.performedBy.name}</td>
+                      <td style={{ padding: '8px' }}>{row.performedBy?.name || 'System'}</td>
                     </tr>
                   ))
                 )}

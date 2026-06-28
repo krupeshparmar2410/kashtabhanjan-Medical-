@@ -395,90 +395,179 @@ const postPurchase = async (req, res) => {
         throw new Error('No items found in this purchase invoice');
       }
 
-      // Update purchase header status
-      purchase.purchaseStatus = 'Posted';
-      purchase.approvedBy = req.user.id;
-      purchase.approvedAt = new Date();
-      await purchase.save({ session });
+      // Track original states and created documents for manual rollback if standalone MongoDB fails
+      const createdDocs = [];
+      const originalMedicines = [];
+      let originalAgency = null;
+      const originalPurchaseStatus = {
+        id: purchase._id,
+        purchaseStatus: purchase.purchaseStatus,
+        approvedBy: purchase.approvedBy,
+        approvedAt: purchase.approvedAt
+      };
 
-      // Process each line item: Create inventory batch, update medicine total stock
-      for (const item of items) {
-        const medicine = await Medicine.findOne({ _id: item.medicineId, isDeleted: false }).session(session);
-        if (!medicine) {
-          throw new Error(`Medicine not found or deleted: ID ${item.medicineId}`);
+      try {
+        const agency = await Agency.findOne({ _id: purchase.agencyId, isDeleted: false }).session(session);
+        if (agency) {
+          originalAgency = {
+            id: agency._id,
+            currentBalance: agency.currentBalance,
+            lastPurchaseDate: agency.lastPurchaseDate
+          };
         }
 
-        const batchCode = await generateNextBatchCode();
-        
-        // Calculate status
-        const today = new Date();
-        const expiryDate = new Date(item.expiryDate);
-        let status = 'Active';
-        if (expiryDate <= today) {
-          status = 'Expired';
-        } else {
-          const daysToExpiry = (expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
-          if (daysToExpiry <= (medicine.expiryAlertDays || 90)) {
-            status = 'Near Expiry';
+        // Update purchase header status
+        purchase.purchaseStatus = 'Posted';
+        purchase.approvedBy = req.user.id;
+        purchase.approvedAt = new Date();
+        await purchase.save({ session });
+
+        // Process each line item: Create inventory batch, update medicine total stock
+        for (const item of items) {
+          const medicine = await Medicine.findOne({ _id: item.medicineId, isDeleted: false }).session(session);
+          if (!medicine) {
+            throw new Error(`Medicine not found or deleted: ID ${item.medicineId}`);
+          }
+
+          // Snapshot medicine before update
+          originalMedicines.push({
+            id: medicine._id,
+            currentStock: medicine.currentStock,
+            purchasePrice: medicine.purchasePrice,
+            sellingPrice: medicine.sellingPrice,
+            mrp: medicine.mrp
+          });
+
+          const batchCode = await generateNextBatchCode();
+          
+          // Calculate status
+          const today = new Date();
+          const expiryDate = new Date(item.expiryDate);
+          let status = 'Active';
+          if (expiryDate <= today) {
+            status = 'Expired';
+          } else {
+            const daysToExpiry = (expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+            if (daysToExpiry <= (medicine.expiryAlertDays || 90)) {
+              status = 'Near Expiry';
+            }
+          }
+
+          const totalQty = Number(item.quantity) + Number(item.freeQuantity || 0);
+
+          const newBatch = new InventoryBatch({
+            batchCode,
+            medicineId: item.medicineId,
+            purchaseItemId: item._id,
+            batchNumber: item.batchNumber,
+            manufacturingDate: item.manufacturingDate,
+            expiryDate: item.expiryDate,
+            originalQuantity: totalQty,
+            availableQuantity: totalQty,
+            reservedQuantity: 0,
+            purchasePrice: item.purchasePrice,
+            sellingPrice: item.sellingPrice,
+            mrp: item.mrp,
+            status,
+            isLocked: false,
+            isSaleBlocked: status === 'Expired',
+            createdBy: req.user.id
+          });
+
+          await newBatch.save({ session });
+          createdDocs.push(newBatch);
+
+          // Update medicine stock & cost details
+          medicine.currentStock = (medicine.currentStock || 0) + totalQty;
+          // Keep prices updated if higher
+          if (item.purchasePrice > (medicine.purchasePrice || 0)) medicine.purchasePrice = item.purchasePrice;
+          if (item.sellingPrice > (medicine.sellingPrice || 0)) medicine.sellingPrice = item.sellingPrice;
+          if (item.mrp > (medicine.mrp || 0)) medicine.mrp = item.mrp;
+          
+          await medicine.save({ session });
+
+          // Log Activity
+          const activity = new InventoryActivity({
+            inventoryBatchId: newBatch._id,
+            action: 'Purchase Receipt',
+            description: `Stock of ${totalQty} units received via Purchase ${purchase.purchaseNumber} (Invoice #${purchase.invoiceNumber})`,
+            performedBy: req.user.id
+          });
+          await activity.save({ session });
+          createdDocs.push(activity);
+        }
+
+        // Ledger Bookkeeping
+        // Since it's a purchase, credit supplier ledger
+        const ledgerEntry = await updateAgencyLedgerAndBalance(
+          purchase.agencyId,
+          'Purchase',
+          purchase._id,
+          purchase.purchaseNumber,
+          0,
+          purchase.grandTotal,
+          `Credit invoice entry for purchase ${purchase.purchaseNumber}`,
+          session
+        );
+        if (ledgerEntry) {
+          createdDocs.push(ledgerEntry);
+        }
+
+        return purchase;
+
+      } catch (err) {
+        const { getStatus } = require('../config/TransactionManager');
+        const hasTxSupport = getStatus().transactionSupport;
+        if (!hasTxSupport) {
+          const logger = require('../config/logger');
+          logger.warn(`Stand-alone database rollback: compensating postPurchase failure for purchase ${purchase.purchaseNumber || 'N/A'}...`);
+
+          // 1. Delete created documents in reverse order to prevent orphans
+          for (let i = createdDocs.length - 1; i >= 0; i--) {
+            try {
+              const doc = createdDocs[i];
+              await doc.constructor.deleteOne({ _id: doc._id });
+            } catch (delErr) {
+              logger.error(`Manual Rollback ERROR: Failed to delete doc from ${createdDocs[i].constructor.modelName}: ${delErr.message}`);
+            }
+          }
+
+          // 2. Restore modified medicine master stocks and prices
+          for (const m of originalMedicines) {
+            try {
+              await Medicine.updateOne(
+                { _id: m.id },
+                { $set: { currentStock: m.currentStock, purchasePrice: m.purchasePrice, sellingPrice: m.sellingPrice, mrp: m.mrp } }
+              );
+            } catch (mErr) {
+              logger.error(`Manual Rollback ERROR: Failed to restore Medicine ${m.id}: ${mErr.message}`);
+            }
+          }
+
+          // 3. Restore supplier agency balances
+          if (originalAgency) {
+            try {
+              await Agency.updateOne(
+                { _id: originalAgency.id },
+                { $set: { currentBalance: originalAgency.currentBalance, lastPurchaseDate: originalAgency.lastPurchaseDate } }
+              );
+            } catch (aErr) {
+              logger.error(`Manual Rollback ERROR: Failed to restore Agency ${originalAgency.id}: ${aErr.message}`);
+            }
+          }
+
+          // 4. Restore purchase header status
+          try {
+            await Purchase.updateOne(
+              { _id: originalPurchaseStatus.id },
+              { $set: { purchaseStatus: originalPurchaseStatus.purchaseStatus, approvedBy: originalPurchaseStatus.approvedBy, approvedAt: originalPurchaseStatus.approvedAt } }
+            );
+          } catch (pErr) {
+            logger.error(`Manual Rollback ERROR: Failed to restore Purchase status ${originalPurchaseStatus.id}: ${pErr.message}`);
           }
         }
-
-        const totalQty = Number(item.quantity) + Number(item.freeQuantity || 0);
-
-        const newBatch = new InventoryBatch({
-          batchCode,
-          medicineId: item.medicineId,
-          purchaseItemId: item._id,
-          batchNumber: item.batchNumber,
-          manufacturingDate: item.manufacturingDate,
-          expiryDate: item.expiryDate,
-          originalQuantity: totalQty,
-          availableQuantity: totalQty,
-          reservedQuantity: 0,
-          purchasePrice: item.purchasePrice,
-          sellingPrice: item.sellingPrice,
-          mrp: item.mrp,
-          status,
-          isLocked: false,
-          isSaleBlocked: status === 'Expired',
-          createdBy: req.user.id
-        });
-
-        await newBatch.save({ session });
-
-        // Update medicine stock & cost details
-        medicine.currentStock = (medicine.currentStock || 0) + totalQty;
-        // Keep prices updated if higher
-        if (item.purchasePrice > (medicine.purchasePrice || 0)) medicine.purchasePrice = item.purchasePrice;
-        if (item.sellingPrice > (medicine.sellingPrice || 0)) medicine.sellingPrice = item.sellingPrice;
-        if (item.mrp > (medicine.mrp || 0)) medicine.mrp = item.mrp;
-        
-        await medicine.save({ session });
-
-        // Log Activity
-        const activity = new InventoryActivity({
-          inventoryBatchId: newBatch._id,
-          action: 'Purchase Receipt',
-          description: `Stock of ${totalQty} units received via Purchase ${purchase.purchaseNumber} (Invoice #${purchase.invoiceNumber})`,
-          performedBy: req.user.id
-        });
-        await activity.save({ session });
+        throw err;
       }
-
-      // Ledger Bookkeeping
-      // Since it's a purchase, credit supplier ledger
-      await updateAgencyLedgerAndBalance(
-        purchase.agencyId,
-        'Purchase',
-        purchase._id,
-        purchase.purchaseNumber,
-        0,
-        purchase.grandTotal,
-        `Credit invoice entry for purchase ${purchase.purchaseNumber}`,
-        session
-      );
-
-      return purchase;
     });
 
     res.json({
@@ -507,55 +596,157 @@ const deletePurchase = async (req, res) => {
       await runInTransaction(async (session) => {
         const items = await PurchaseItem.find({ purchaseId: purchase._id }).session(session);
 
-        for (const item of items) {
-          // Find the batch created
-          const batch = await InventoryBatch.findOne({ purchaseItemId: item._id, isDeleted: false }).session(session);
-          if (batch) {
-            // Check if batch is partially consumed
-            if (batch.availableQuantity < batch.originalQuantity) {
-              throw new Error(`Cannot delete purchase. Stock from batch ${batch.batchNumber} has already been partially consumed.`);
-            }
+        const createdDocs = [];
+        const originalBatches = [];
+        const originalMedicines = [];
+        let originalAgency = null;
+        const originalPurchase = {
+          id: purchase._id,
+          purchaseStatus: purchase.purchaseStatus,
+          isDeleted: purchase.isDeleted,
+          updatedBy: purchase.updatedBy
+        };
 
-            // Subtract stock from Medicine
-            const medicine = await Medicine.findOne({ _id: item.medicineId }).session(session);
-            if (medicine) {
-              medicine.currentStock = Math.max(0, (medicine.currentStock || 0) - batch.originalQuantity);
-              await medicine.save({ session });
-            }
-
-            // Soft delete the batch
-            batch.isDeleted = true;
-            batch.availableQuantity = 0;
-            batch.status = 'Sold Out';
-            await batch.save({ session });
-
-            // Create revert log activity
-            const activity = new InventoryActivity({
-              inventoryBatchId: batch._id,
-              action: 'Disposal',
-              description: `Stock deleted due to cancellation of Purchase ${purchase.purchaseNumber}`,
-              performedBy: req.user.id
-            });
-            await activity.save({ session });
+        try {
+          const agency = await Agency.findOne({ _id: purchase.agencyId, isDeleted: false }).session(session);
+          if (agency) {
+            originalAgency = {
+              id: agency._id,
+              currentBalance: agency.currentBalance,
+              lastPurchaseDate: agency.lastPurchaseDate
+            };
           }
+
+          for (const item of items) {
+            // Find the batch created
+            const batch = await InventoryBatch.findOne({ purchaseItemId: item._id, isDeleted: false }).session(session);
+            if (batch) {
+              // Check if batch is partially consumed
+              if (batch.availableQuantity < batch.originalQuantity) {
+                throw new Error(`Cannot delete purchase. Stock from batch ${batch.batchNumber} has already been partially consumed.`);
+              }
+
+              // Subtract stock from Medicine
+              const medicine = await Medicine.findOne({ _id: item.medicineId }).session(session);
+              if (medicine) {
+                originalMedicines.push({
+                  id: medicine._id,
+                  currentStock: medicine.currentStock
+                });
+                medicine.currentStock = Math.max(0, (medicine.currentStock || 0) - batch.originalQuantity);
+                await medicine.save({ session });
+              }
+
+              originalBatches.push({
+                id: batch._id,
+                isDeleted: batch.isDeleted,
+                availableQuantity: batch.availableQuantity,
+                status: batch.status
+              });
+
+              // Soft delete the batch
+              batch.isDeleted = true;
+              batch.availableQuantity = 0;
+              batch.status = 'Sold Out';
+              await batch.save({ session });
+
+              // Create revert log activity
+              const activity = new InventoryActivity({
+                inventoryBatchId: batch._id,
+                action: 'Disposal',
+                description: `Stock deleted due to cancellation of Purchase ${purchase.purchaseNumber}`,
+                performedBy: req.user.id
+              });
+              await activity.save({ session });
+              createdDocs.push(activity);
+            }
+          }
+
+          // Ledger reversal (debit the ledger to zero out credit balance)
+          const ledgerEntry = await updateAgencyLedgerAndBalance(
+            purchase.agencyId,
+            'Purchase Return',
+            purchase._id,
+            purchase.purchaseNumber,
+            purchase.grandTotal,
+            0,
+            `Reversal/deletion of purchase bill ${purchase.purchaseNumber}`,
+            session
+          );
+          if (ledgerEntry) {
+            createdDocs.push(ledgerEntry);
+          }
+
+          purchase.purchaseStatus = 'Cancelled';
+          purchase.isDeleted = true;
+          purchase.updatedBy = req.user.id;
+          await purchase.save({ session });
+
+        } catch (err) {
+          const { getStatus } = require('../config/TransactionManager');
+          const hasTxSupport = getStatus().transactionSupport;
+          if (!hasTxSupport) {
+            const logger = require('../config/logger');
+            logger.warn(`Stand-alone database rollback: compensating deletePurchase failure for purchase ${purchase.purchaseNumber || 'N/A'}...`);
+
+            // 1. Delete created documents in reverse order to prevent orphans
+            for (let i = createdDocs.length - 1; i >= 0; i--) {
+              try {
+                const doc = createdDocs[i];
+                await doc.constructor.deleteOne({ _id: doc._id });
+              } catch (delErr) {
+                logger.error(`Manual Rollback ERROR: Failed to delete doc from ${createdDocs[i].constructor.modelName}: ${delErr.message}`);
+              }
+            }
+
+            // 2. Restore modified inventory batches
+            for (const b of originalBatches) {
+              try {
+                await InventoryBatch.updateOne(
+                  { _id: b.id },
+                  { $set: { isDeleted: b.isDeleted, availableQuantity: b.availableQuantity, status: b.status } }
+                );
+              } catch (bErr) {
+                logger.error(`Manual Rollback ERROR: Failed to restore InventoryBatch ${b.id}: ${bErr.message}`);
+              }
+            }
+
+            // 3. Restore medicines
+            for (const m of originalMedicines) {
+              try {
+                await Medicine.updateOne(
+                  { _id: m.id },
+                  { $set: { currentStock: m.currentStock } }
+                );
+              } catch (mErr) {
+                logger.error(`Manual Rollback ERROR: Failed to restore Medicine ${m.id}: ${mErr.message}`);
+              }
+            }
+
+            // 4. Restore supplier agency balances
+            if (originalAgency) {
+              try {
+                await Agency.updateOne(
+                  { _id: originalAgency.id },
+                  { $set: { currentBalance: originalAgency.currentBalance, lastPurchaseDate: originalAgency.lastPurchaseDate } }
+                );
+              } catch (aErr) {
+                logger.error(`Manual Rollback ERROR: Failed to restore Agency ${originalAgency.id}: ${aErr.message}`);
+              }
+            }
+
+            // 5. Restore purchase header
+            try {
+              await Purchase.updateOne(
+                { _id: originalPurchase.id },
+                { $set: { purchaseStatus: originalPurchase.purchaseStatus, isDeleted: originalPurchase.isDeleted, updatedBy: originalPurchase.updatedBy } }
+              );
+            } catch (pErr) {
+              logger.error(`Manual Rollback ERROR: Failed to restore Purchase status ${originalPurchase.id}: ${pErr.message}`);
+            }
+          }
+          throw err;
         }
-
-        // Ledger reversal (debit the ledger to zero out credit balance)
-        await updateAgencyLedgerAndBalance(
-          purchase.agencyId,
-          'Purchase Return',
-          purchase._id,
-          purchase.purchaseNumber,
-          purchase.grandTotal,
-          0,
-          `Reversal/deletion of purchase bill ${purchase.purchaseNumber}`,
-          session
-        );
-
-        purchase.purchaseStatus = 'Cancelled';
-        purchase.isDeleted = true;
-        purchase.updatedBy = req.user.id;
-        await purchase.save({ session });
       });
     } else {
       // Just mark deleted if it was a draft

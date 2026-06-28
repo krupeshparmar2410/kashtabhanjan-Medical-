@@ -12,8 +12,8 @@ const {
 const { logSystemAction } = require('../config/AuditService');
 
 // Helper to generate JWT Token
-const generateToken = (id) => {
-  return jwt.sign({ id }, process.env.JWT_SECRET, {
+const generateToken = (user) => {
+  return jwt.sign({ id: user._id, tokenVersion: user.tokenVersion }, process.env.JWT_SECRET, {
     expiresIn: process.env.JWT_EXPIRE || '24h'
   });
 };
@@ -27,11 +27,16 @@ const loginUser = async (req, res, next) => {
   const userAgent = req.headers['user-agent'] || 'Unknown';
 
   try {
-    const user = await User.findOne({ email });
+    const user = await User.findOne({ email }).select('+password');
 
     if (!user) {
       await handleFailedLogin(email, ipAddress, userAgent);
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
+    }
+
+    // Check if user is active
+    if (!user.isActive) {
+      return res.status(403).json({ success: false, message: 'Account is disabled. Contact system administrator.' });
     }
 
     // Check if account is locked
@@ -56,8 +61,8 @@ const loginUser = async (req, res, next) => {
       return res.status(401).json({ success: false, message: 'Invalid credentials' });
     }
 
-    // Generate token
-    const token = generateToken(user._id);
+    // Generate token passing the user document
+    const token = generateToken(user);
 
     // Register active session & concurrent limits
     const session = await handleSuccessfulLogin(user, ipAddress, userAgent, token);
@@ -195,17 +200,35 @@ const revokeAllSessions = async (req, res, next) => {
   }
 };
 
-// @desc    Reset password with strength validation and force logouts
+// @desc    Reset password with current password verification and force logouts
 // @route   POST /api/auth/reset-password
 // @access  Private
 const resetPassword = async (req, res, next) => {
   try {
-    const { newPassword } = req.body;
+    const { currentPassword, newPassword } = req.body;
     
-    if (!newPassword) {
-      return res.status(400).json({ success: false, message: 'New password is required.' });
+    if (!currentPassword || !newPassword) {
+      return res.status(400).json({ success: false, message: 'Current password and new password are required.' });
     }
 
+    const user = await User.findById(req.user.id).select('+password');
+    if (!user) {
+      return res.status(404).json({ success: false, message: 'User not found.' });
+    }
+
+    // 1. Verify current password using bcrypt
+    const isMatch = await user.matchPassword(currentPassword);
+    if (!isMatch) {
+      return res.status(401).json({ success: false, message: 'Invalid current password.' });
+    }
+
+    // 2. Reject reuse of existing password
+    const isReused = await user.matchPassword(newPassword);
+    if (isReused) {
+      return res.status(400).json({ success: false, message: 'New password cannot be the same as your current password.' });
+    }
+
+    // Validate complexity of the new password
     const isValid = validatePasswordStrength(newPassword);
     if (!isValid) {
       return res.status(400).json({
@@ -214,11 +237,12 @@ const resetPassword = async (req, res, next) => {
       });
     }
 
-    const user = await User.findById(req.user.id);
     user.password = newPassword; // Pre-save hook hashes this
+    user.needsPasswordReset = false; // Reset complete
+    user.tokenVersion += 1; // Increment version to invalidate active JWTs
     await user.save();
 
-    // Log to audit log
+    // 3. Log to audit log
     await logSystemAction(req, {
       actionType: 'User Password Reset',
       module: 'Security',
@@ -227,7 +251,7 @@ const resetPassword = async (req, res, next) => {
       remarks: 'Password reset completed. Force terminating other sessions.'
     });
 
-    // Force terminate all active sessions for this user
+    // 4. Force terminate all active sessions for this user
     await forceLogoutAllUserSessions(user._id, 'Password reset trigger');
 
     res.json({ success: true, message: 'Password updated successfully. Other active sessions have been logged out.' });
@@ -250,7 +274,11 @@ const changeUserRole = async (req, res, next) => {
       return res.status(400).json({ success: false, message: 'Target user ID and new role are required.' });
     }
 
-    if (!['admin', 'staff'].includes(newRole)) {
+    if (targetUserId === req.user.id.toString()) {
+      return res.status(400).json({ success: false, message: 'You cannot change your own role.' });
+    }
+
+    if (!['admin', 'pharmacist', 'staff'].includes(newRole)) {
       return res.status(400).json({ success: false, message: 'Invalid role selection.' });
     }
 

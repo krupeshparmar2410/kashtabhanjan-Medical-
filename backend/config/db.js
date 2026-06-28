@@ -1,5 +1,6 @@
 const mongoose = require('mongoose');
 const { setTransactionSupport } = require('./TransactionManager');
+const logger = require('./logger');
 
 const connectDB = async () => {
   const atlasURI = process.env.MONGO_URI;
@@ -10,16 +11,20 @@ const connectDB = async () => {
   let replicaSet = 'standalone';
   let transactionSupport = false;
 
+  const mongooseOptions = {
+    serverSelectionTimeoutMS: 10000,
+    socketTimeoutMS: 45000,
+    connectTimeoutMS: 10000
+  };
+
   // 1. Try to connect to Atlas if provided
   if (atlasURI) {
     let delay = 1000;
     for (let attempt = 1; attempt <= 3; attempt++) {
       try {
-        console.log(`Attempting to connect to MongoDB Atlas (Attempt ${attempt}/3)...`);
-        await mongoose.connect(atlasURI, {
-          serverSelectionTimeoutMS: 10000
-        });
-        console.log('MongoDB Connected (Atlas) successfully.');
+        logger.info(`Attempting to connect to MongoDB Atlas (Attempt ${attempt}/3)...`);
+        await mongoose.connect(atlasURI, mongooseOptions);
+        logger.info('MongoDB Connected (Atlas) successfully.');
         connected = true;
         dbType = 'Atlas';
         break;
@@ -34,10 +39,10 @@ const connectDB = async () => {
         } else {
           reason = err.message;
         }
-        console.error(`MongoDB Atlas connection attempt ${attempt} failed: ${reason}`);
+        logger.error(`MongoDB Atlas connection attempt ${attempt} failed: ${reason}`);
         
         if (attempt < 3) {
-          console.log(`Retrying Atlas connection in ${delay}ms...`);
+          logger.info(`Retrying Atlas connection in ${delay}ms...`);
           await new Promise(resolve => setTimeout(resolve, delay));
           delay *= 2; // Exponential backoff
         }
@@ -47,18 +52,26 @@ const connectDB = async () => {
 
   // 2. Fall back to local MongoDB if Atlas fails or is not configured
   if (!connected) {
-    console.log('Falling back to local MongoDB instance...');
-    try {
-      await mongoose.connect(localURI, {
-        serverSelectionTimeoutMS: 5000
-      });
-      console.log('MongoDB Connected (Local Fallback) successfully.');
-      connected = true;
-      dbType = 'Local';
-    } catch (localError) {
-      console.error(`Local MongoDB connection failed: ${localError.message}`);
-      console.error('CRITICAL: Database connection failed completely. Please make sure local MongoDB service is running.');
-      process.exit(1);
+    logger.info('Falling back to local MongoDB instance...');
+    let localDelay = 2000;
+    for (let attempt = 1; attempt <= 3; attempt++) {
+      try {
+        logger.info(`Attempting to connect to Local MongoDB (Attempt ${attempt}/3)...`);
+        await mongoose.connect(localURI, mongooseOptions);
+        logger.info('MongoDB Connected (Local Fallback) successfully.');
+        connected = true;
+        dbType = 'Local';
+        break;
+      } catch (localError) {
+        logger.error(`Local MongoDB connection attempt ${attempt} failed: ${localError.message}`);
+        if (attempt < 3) {
+          logger.info(`Retrying Local MongoDB connection in ${localDelay}ms...`);
+          await new Promise(resolve => setTimeout(resolve, localDelay));
+        } else {
+          logger.error('CRITICAL: Database connection failed completely. Please make sure local MongoDB service is running.');
+          throw new Error('Database connection failed completely.');
+        }
+      }
     }
   }
 
@@ -88,7 +101,7 @@ const connectDB = async () => {
     } else {
       replicaSet = 'standalone';
       transactionSupport = false;
-      console.warn(`Could not verify replica set status: ${err.message}. Running in standalone mode.`);
+      logger.warn(`Could not verify replica set status: ${err.message}. Running in standalone mode.`);
     }
   }
 
@@ -109,3 +122,4 @@ const connectDB = async () => {
 };
 
 module.exports = connectDB;
+

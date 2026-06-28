@@ -20,12 +20,27 @@ const UserSchema = new mongoose.Schema({
     type: String,
     required: [true, 'Please add a password'],
     minlength: 6,
-    select: true
+    select: false
   },
   role: {
     type: String,
-    enum: ['admin', 'staff'],
-    default: 'staff'
+    default: 'admin'
+  },
+  isActive: {
+    type: Boolean,
+    default: true
+  },
+  needsPasswordReset: {
+    type: Boolean,
+    default: true
+  },
+  isPrimaryAdmin: {
+    type: Boolean,
+    default: true
+  },
+  tokenVersion: {
+    type: Number,
+    default: 1
   },
   failedLoginAttempts: {
     type: Number,
@@ -43,14 +58,40 @@ const UserSchema = new mongoose.Schema({
 
 UserSchema.index({ role: 1 });
 
-// Encrypt password using bcrypt
+// Encrypt password, check cardinality
 UserSchema.pre('save', async function (next) {
-  if (!this.isModified('password')) {
-    next();
+  // 1. Cardinality Check
+  if (this.isNew && this.role === 'admin') {
+    try {
+      const count = await mongoose.models.User.countDocuments({ role: 'admin' });
+      if (count >= 1) {
+        return next(new Error('Single Admin Integrity Violation: Cannot create secondary administrator accounts.'));
+      }
+    } catch (err) {
+      return next(err);
+    }
   }
 
-  const salt = await bcrypt.genSalt(10);
-  this.password = await bcrypt.hash(this.password, salt);
+  // 2. Encrypt Password
+  if (!this.isModified('password')) {
+    return next();
+  }
+
+  try {
+    const salt = await bcrypt.genSalt(10);
+    this.password = await bcrypt.hash(this.password, salt);
+    next();
+  } catch (err) {
+    next(err);
+  }
+});
+
+// Prevent Admin deletion
+UserSchema.pre('remove', function (next) {
+  if (this.isPrimaryAdmin === true) {
+    return next(new Error('Single Admin Integrity Violation: Cannot delete the primary administrator.'));
+  }
+  next();
 });
 
 // Match user entered password to hashed password in database

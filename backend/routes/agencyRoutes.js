@@ -12,6 +12,7 @@ const {
   exportAgenciesPdf
 } = require('../controllers/agencyController');
 const { protect } = require('../middleware/authMiddleware');
+const { authorize } = require('../middleware/roleMiddleware');
 
 // Protect all routes
 router.use(protect);
@@ -22,12 +23,12 @@ router.get('/export/pdf', exportAgenciesPdf);
 
 router.route('/')
   .get(getAgencies)
-  .post(createAgency);
+  .post(authorize('admin', 'pharmacist'), createAgency);
 
 router.route('/:id')
   .get(getAgencyById)
-  .put(updateAgency)
-  .delete(deleteAgency);
+  .put(authorize('admin', 'pharmacist'), updateAgency)
+  .delete(authorize('admin'), deleteAgency);
 
 router.get('/:id/activities', getAgencyActivities);
 

@@ -113,5 +113,6 @@ InventoryBatchSchema.index({ batchNumber: 1 });
 InventoryBatchSchema.index({ expiryDate: 1 });
 InventoryBatchSchema.index({ status: 1 });
 InventoryBatchSchema.index({ isDeleted: 1 });
+InventoryBatchSchema.index({ medicineId: 1, batchNumber: 1, isDeleted: 1 }, { unique: true });
 
 module.exports = mongoose.model('InventoryBatch', InventoryBatchSchema);

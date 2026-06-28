@@ -132,6 +132,10 @@ const SaleSchema = new mongoose.Schema(
       enum: ['Draft', 'Completed', 'Cancelled', 'Returned'],
       default: 'Completed'
     },
+    expiresAt: {
+      type: Date,
+      default: null
+    },
     loyaltyPointsEarned: {
       type: Number,
       default: 0

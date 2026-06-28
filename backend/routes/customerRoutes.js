@@ -15,6 +15,7 @@ const {
   getCustomerAnalytics
 } = require('../controllers/customerController');
 const { protect } = require('../middleware/authMiddleware');
+const { authorize } = require('../middleware/roleMiddleware');
 const { checkPermission } = require('../middleware/PermissionMiddleware');
 
 // Protect all routes
@@ -29,9 +30,9 @@ router.route('/')
 router.route('/:id')
   .get(getCustomerById)
   .put(checkPermission('edit_customer'), updateCustomer)
-  .delete(deleteCustomer);
+  .delete(authorize('admin'), deleteCustomer);
 
-router.post('/:id/restore', restoreCustomer);
+router.post('/:id/restore', authorize('admin'), restoreCustomer);
 router.get('/:id/ledger', getCustomerLedger);
 router.get('/:id/loyalty', getCustomerLoyaltyLedger);
 router.get('/:id/analytics', getCustomerAnalytics);

@@ -18,11 +18,11 @@ import {
   FaDatabase,
   FaFileMedical,
   FaBell,
-  FaUndo
+  FaUndo,
+  FaHeartbeat
 } from 'react-icons/fa';
 import { MdDashboard, MdLocalPharmacy } from 'react-icons/md';
 import { inventoryAPI } from '../services/api';
-
 const Sidebar = ({ isOpen, onClose, handleLogout }) => {
   const navigate = useNavigate();
   const location = useLocation();
@@ -63,7 +63,8 @@ const Sidebar = ({ isOpen, onClose, handleLogout }) => {
     { id: 'cash-closing', name: 'Cash Closing', icon: <FaCashRegister />, path: '/cash-closing' },
     { id: 'audit-logs', name: 'Audit Logs', icon: <FaHistory />, path: '/audit-logs' },
     { id: 'settings', name: 'Settings', icon: <FaCog />, path: '/settings' },
-    { id: 'maintenance', name: 'Maintenance', icon: <FaDatabase />, path: '/maintenance' }
+    { id: 'maintenance', name: 'Maintenance', icon: <FaDatabase />, path: '/maintenance' },
+    { id: 'diagnostics', name: 'Diagnostics', icon: <FaHeartbeat />, path: '/diagnostics' }
   ];
 
   // Helper to determine if a menu item is active

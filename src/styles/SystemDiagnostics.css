@@ -1,0 +1,214 @@
+.diagnostics-container {
+  padding: 24px;
+  max-width: 1200px;
+  margin: 0 auto;
+  font-family: 'Outfit', 'Inter', sans-serif;
+  color: #f1f5f9;
+}
+
+.diagnostics-container h2 {
+  font-size: 2.2rem;
+  font-weight: 700;
+  margin-bottom: 24px;
+  background: linear-gradient(135deg, #60a5fa, #3b82f6);
+  -webkit-background-clip: text;
+  -webkit-text-fill-color: transparent;
+}
+
+.diagnostics-loader {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  height: 200px;
+  font-size: 1.2rem;
+  color: #94a3b8;
+}
+
+/* Recovery Banner */
+.critical-recovery-banner {
+  background: linear-gradient(135deg, #7f1d1d, #991b1b);
+  border-radius: 12px;
+  padding: 20px;
+  margin-bottom: 30px;
+  border-left: 6px solid #f87171;
+  box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.3);
+}
+
+.critical-recovery-banner h3 {
+  margin: 0 0 16px 0;
+  font-size: 1.4rem;
+  color: #fecaca;
+}
+
+.incident-card {
+  background: rgba(0, 0, 0, 0.2);
+  border-radius: 8px;
+  padding: 16px;
+  margin-bottom: 12px;
+}
+
+.incident-card p {
+  margin: 6px 0;
+  font-size: 0.95rem;
+  color: #f3f4f6;
+}
+
+.resolution-input-group {
+  margin: 12px 0;
+}
+
+.resolution-input-group input {
+  width: 100%;
+  padding: 10px 14px;
+  border-radius: 6px;
+  border: 1px solid #7f1d1d;
+  background: rgba(0, 0, 0, 0.4);
+  color: #fff;
+  font-size: 0.9rem;
+}
+
+.recovery-actions {
+  display: flex;
+  gap: 12px;
+  margin-top: 14px;
+}
+
+.recovery-actions button {
+  padding: 10px 16px;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  border: none;
+  transition: all 0.2s ease;
+}
+
+.btn-force-swap {
+  background-color: #ef4444;
+  color: #fff;
+}
+
+.btn-force-swap:hover {
+  background-color: #dc2626;
+}
+
+.btn-purge-rollback {
+  background-color: #4b5563;
+  color: #f3f4f6;
+}
+
+.btn-purge-rollback:hover {
+  background-color: #374151;
+}
+
+/* Info Cards Grid */
+.health-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+  gap: 24px;
+  margin-top: 10px;
+}
+
+.health-grid .card {
+  background: #1e293b;
+  border-radius: 12px;
+  padding: 24px;
+  border: 1px solid #334155;
+  box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.1);
+  display: flex;
+  flex-direction: column;
+}
+
+.health-grid .card h3 {
+  margin: 0 0 16px 0;
+  font-size: 1.25rem;
+  font-weight: 600;
+  color: #f8fafc;
+}
+
+.timestamp-badge {
+  font-size: 0.85rem;
+  color: #94a3b8;
+  margin-bottom: 12px;
+}
+
+.telemetry-details p, .forecast-details p {
+  margin: 8px 0;
+  font-size: 0.95rem;
+  color: #cbd5e1;
+}
+
+.telemetry-details code {
+  background: #0f172a;
+  padding: 2px 6px;
+  border-radius: 4px;
+  color: #38bdf8;
+  font-family: monospace;
+}
+
+/* Status themes */
+.card.status-Healthy {
+  border-top: 4px solid #10b981;
+}
+
+.card.status-Warning {
+  border-top: 4px solid #f59e0b;
+}
+
+.card.status-Critical {
+  border-top: 4px solid #ef4444;
+}
+
+/* Forecasting details */
+.forecast-details {
+  display: flex;
+  flex-direction: column;
+  gap: 4px;
+}
+
+.badge {
+  display: inline-block;
+  align-self: flex-start;
+  padding: 4px 10px;
+  border-radius: 9999px;
+  font-size: 0.8rem;
+  font-weight: 600;
+  margin-top: 12px;
+}
+
+.risk-Critical {
+  background-color: #fca5a5;
+  color: #7f1d1d;
+}
+
+.risk-Warning {
+  background-color: #fde68a;
+  color: #78350f;
+}
+
+.risk-Info {
+  background-color: #dbeafe;
+  color: #1e3a8a;
+}
+
+.loading-trend {
+  font-size: 0.9rem;
+  color: #64748b;
+  line-height: 1.5;
+}
+
+/* Alert control */
+.btn-retention {
+  margin-top: auto;
+  padding: 12px 18px;
+  background: linear-gradient(135deg, #3b82f6, #2563eb);
+  color: #fff;
+  border: none;
+  border-radius: 6px;
+  font-weight: 600;
+  cursor: pointer;
+  transition: all 0.2s ease;
+}
+
+.btn-retention:hover {
+  background: linear-gradient(135deg, #2563eb, #1d4ed8);
+}

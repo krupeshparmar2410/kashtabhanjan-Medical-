@@ -5,6 +5,7 @@ let initialized = false;
 let transactionSupport = false;
 let dbType = 'Local';
 let replicaSetType = 'standalone';
+let activeTransactionsCount = 0;
 
 const setTransactionSupport = (support, type, rType) => {
   transactionSupport = support;
@@ -54,6 +55,7 @@ const getStatus = () => {
  */
 const execute = async (callback) => {
   await detectSupport();
+  activeTransactionsCount++;
   if (transactionSupport) {
     const session = await mongoose.startSession();
     session.startTransaction();
@@ -66,15 +68,23 @@ const execute = async (callback) => {
       throw err;
     } finally {
       session.endSession();
+      activeTransactionsCount = Math.max(0, activeTransactionsCount - 1);
     }
   } else {
-    // Standalone fallback: execute without session
-    return await callback(null);
+    try {
+      return await callback(null);
+    } finally {
+      activeTransactionsCount = Math.max(0, activeTransactionsCount - 1);
+    }
   }
 };
+
+const getActiveTransactionsCount = () => activeTransactionsCount;
 
 module.exports = {
   execute,
   setTransactionSupport,
-  getStatus
+  getStatus,
+  getActiveTransactionsCount
 };
+

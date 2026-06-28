@@ -25,6 +25,9 @@ const Prescription = require('../models/Prescription');
 const PrescriptionUsage = require('../models/PrescriptionUsage');
 const RefillReminder = require('../models/RefillReminder');
 const { getSetting } = require('./SettingsService');
+const { collectDailyMetrics } = require('./DatabaseMetricsCollectorService');
+const { runAlertRetentionSweep } = require('./AlertRetentionService');
+const { runMaintenanceSuite } = require('./MaintenanceService');
 
 const runExpirySweep = async () => {
   try {
@@ -33,6 +36,14 @@ const runExpirySweep = async () => {
     
     let expiredAlerts = 0;
     let nearExpiryAlerts = 0;
+
+    // Resolve N+1 queries by fetching all referenced medicines in a single database query
+    const medicineIds = [...new Set(batches.map(b => b.medicineId.toString()))];
+    const medicinesList = await Medicine.find({ _id: { $in: medicineIds } }, '_id expiryAlertDays').lean();
+    const medicineCache = new Map();
+    for (const med of medicinesList) {
+      medicineCache.set(med._id.toString(), med.expiryAlertDays !== undefined ? med.expiryAlertDays : 90);
+    }
 
     for (const batch of batches) {
       let statusChanged = false;
@@ -52,8 +63,10 @@ const runExpirySweep = async () => {
           expiredAlerts++;
         } else {
           const daysToExpiry = (expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
-          const medicine = await Medicine.findById(batch.medicineId);
-          const limitDays = medicine ? (medicine.expiryAlertDays || 90) : 90;
+          // Look up from in-memory cache instead of database findById
+          const limitDays = medicineCache.get(batch.medicineId.toString()) !== undefined 
+            ? medicineCache.get(batch.medicineId.toString()) 
+            : 90;
           
           if (daysToExpiry <= limitDays && batch.status !== 'Near Expiry') {
             newStatus = 'Near Expiry';
@@ -95,30 +108,90 @@ const runExpirySweep = async () => {
 
 const cleanupStaleReservations = async () => {
   try {
+    const now = new Date();
     const timeoutThreshold = new Date(Date.now() - 15 * 60 * 1000); // 15 mins
     
     const staleDrafts = await Sale.find({
       invoiceStatus: 'Draft',
-      createdAt: { $lt: timeoutThreshold }
+      $or: [
+        { expiresAt: { $lt: now } },
+        { expiresAt: null, createdAt: { $lt: timeoutThreshold } }
+      ]
     });
 
     if (staleDrafts.length > 0) {
       logger.info(`Releasing stock for ${staleDrafts.length} stale draft billing sheets...`);
+      
+      const { execute: runInTransaction } = require('./TransactionManager');
+      const { logSystemAction } = require('./AuditService');
+      
       for (const draft of staleDrafts) {
-        const items = await SaleItem.find({ saleId: draft._id });
-        for (const item of items) {
-          for (const itemBatch of item.batches) {
-            const batch = await InventoryBatch.findById(itemBatch.inventoryBatchId);
-            if (batch) {
-              batch.reservedQuantity = Math.max(0, (batch.reservedQuantity || 0) - itemBatch.quantity);
-              await batch.save();
+        try {
+          await runInTransaction(async (session) => {
+            const items = await SaleItem.find({ saleId: draft._id }).session(session);
+            const recoveredBatches = [];
+            const recoveredQuantities = [];
+
+            for (const item of items) {
+              for (const itemBatch of item.batches) {
+                const batch = await InventoryBatch.findById(itemBatch.inventoryBatchId).session(session);
+                if (batch) {
+                  // Restore quantities
+                  batch.reservedQuantity = Math.max(0, (batch.reservedQuantity || 0) - itemBatch.quantity);
+                  batch.availableQuantity = Math.round((batch.availableQuantity + itemBatch.quantity) * 100) / 100;
+                  
+                  // Reopen sold out batches
+                  if (batch.status === 'Sold Out' || batch.availableQuantity > 0) {
+                    const today = new Date();
+                    if (new Date(batch.expiryDate) > today && !batch.isLocked) {
+                      batch.status = 'Active';
+                      batch.isSaleBlocked = false;
+                    } else if (new Date(batch.expiryDate) <= today) {
+                      batch.status = 'Expired';
+                      batch.isSaleBlocked = true;
+                    }
+                  }
+                  await batch.save({ session });
+
+                  recoveredBatches.push(batch.batchNumber);
+                  recoveredQuantities.push(`${itemBatch.quantity} units (Batch: ${batch.batchNumber})`);
+                }
+
+                // Restore Medicine master stock
+                const medicine = await Medicine.findById(item.medicineId).session(session);
+                if (medicine) {
+                  medicine.currentStock = Math.round((medicine.currentStock + itemBatch.quantity) * 100) / 100;
+                  await medicine.save({ session });
+                }
+              }
             }
-          }
+
+            // Mark draft as Cancelled
+            draft.invoiceStatus = 'Cancelled';
+            draft.remarks = 'Invoice draft reservation expired and released automatically.';
+            await draft.save({ session });
+
+            // Create cryptographically chained audit log
+            await logSystemAction(null, {
+              actionType: 'Draft Stock Recovered',
+              module: 'Inventory',
+              entityType: 'Sale',
+              entityId: draft._id,
+              newValues: {
+                draftId: draft._id,
+                invoiceNumber: draft.invoiceNumber,
+                recoveredQuantities,
+                recoveredBatches,
+                recoveryTimestamp: new Date()
+              },
+              remarks: `Expired Draft ${draft.invoiceNumber} cancelled. Stock restored.`,
+              session
+            });
+          });
+          logger.info(`Stale draft invoice ${draft.invoiceNumber} successfully cancelled and stock recovered.`);
+        } catch (draftErr) {
+          logger.error(`Failed to cancel and recover stock for stale draft ${draft.invoiceNumber}:`, draftErr);
         }
-        
-        draft.invoiceStatus = 'Cancelled';
-        draft.remarks = 'Invoice draft reservation expired and released automatically.';
-        await draft.save();
       }
       logger.info('Stale stock reservations release cycle completed.');
     }
@@ -477,6 +550,13 @@ const runDailySchedulerJobs = async () => {
     const sessionCutoff = new Date(Date.now() - 24 * 60 * 60 * 1000);
     await ActiveSession.deleteMany({ expiresAt: { $lt: sessionCutoff } });
 
+    // 5. Collect daily database telemetry snapshot metrics
+    try {
+      await collectDailyMetrics();
+    } catch (metricErr) {
+      logger.error('Daily database metrics collection failed:', metricErr);
+    }
+
     logger.info('Daily scheduler tasks completed successfully.');
     return true;
   } catch (err) {
@@ -545,6 +625,13 @@ const runMonthlySchedulerJobs = async () => {
 
     // 2. Backup retention sweeps processing
     await runRetentionPurge();
+
+    // 3. Alert retention sweeps processing
+    try {
+      await runAlertRetentionSweep();
+    } catch (retSweepErr) {
+      logger.error('Monthly alert retention sweep failed:', retSweepErr);
+    }
 
     logger.info('Monthly scheduler tasks completed successfully.');
     return true;
@@ -689,6 +776,15 @@ const startBackgroundJobs = () => {
       // Daily at 11:00 PM (23:00)
       if (currentHour === 23 && currentMinute === 0) {
         await runDailySchedulerJobs();
+      }
+
+      // Daily Preventive Maintenance at 01:00 AM
+      if (currentHour === 1 && currentMinute === 0) {
+        try {
+          await runMaintenanceSuite();
+        } catch (maintErr) {
+          logger.error('Scheduled daily preventive maintenance failed:', maintErr);
+        }
       }
       
       // Weekly: Sunday at 02:00 AM

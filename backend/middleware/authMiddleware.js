@@ -28,6 +28,27 @@ const protect = async (req, res, next) => {
         return res.status(401).json({ success: false, message: 'Not authorized, user not found' });
       }
 
+      // Block disabled accounts from accessing routes
+      if (!req.user.isActive) {
+        return res.status(403).json({ success: false, message: 'Not authorized, account is disabled' });
+      }
+
+      // Enforce needsPasswordReset gate
+      if (req.user.needsPasswordReset && 
+          !req.originalUrl.includes('/auth/reset-password') && 
+          !req.originalUrl.includes('/auth/logout')) {
+        return res.status(403).json({
+          success: false,
+          needsPasswordReset: true,
+          message: 'Password reset is required before accessing system features.'
+        });
+      }
+
+      // Enforce tokenVersion mismatch check
+      if (decoded.tokenVersion !== req.user.tokenVersion) {
+        return res.status(401).json({ success: false, message: 'Not authorized, session expired or revoked' });
+      }
+
       // Validate active session status
       const isSessionActive = await validateSessionActivity(token, req);
       if (!isSessionActive) {

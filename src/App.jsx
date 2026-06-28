@@ -27,6 +27,7 @@ import AuditLogsPage from './pages/AuditLogsPage';
 import DatabaseMaintenance from './pages/DatabaseMaintenance';
 import PrescriptionsAdmin from './pages/PrescriptionsAdmin';
 import RemindersAdmin from './pages/RemindersAdmin';
+import SystemDiagnostics from './pages/SystemDiagnostics';
 import Layout from './components/Layout';
 import ProtectedRoute from './components/ProtectedRoute';
 import { authAPI } from './services/api';
@@ -418,6 +419,18 @@ function App() {
             <ProtectedRoute>
               <Layout user={user} handleLogout={handleLogout}>
                 <DatabaseMaintenance />
+              </Layout>
+            </ProtectedRoute>
+          }
+        />
+
+        {/* System Diagnostics & Alert Manager */}
+        <Route
+          path="/diagnostics"
+          element={
+            <ProtectedRoute>
+              <Layout user={user} handleLogout={handleLogout}>
+                <SystemDiagnostics />
               </Layout>
             </ProtectedRoute>
           }

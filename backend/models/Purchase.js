@@ -124,5 +124,6 @@ const PurchaseSchema = new mongoose.Schema(
 PurchaseSchema.index({ invoiceNumber: 1 });
 PurchaseSchema.index({ agencyId: 1 });
 PurchaseSchema.index({ purchaseDate: 1 });
+PurchaseSchema.index({ agencyId: 1, invoiceNumber: 1, isDeleted: 1 }, { unique: true });
 
 module.exports = mongoose.model('Purchase', PurchaseSchema);

@@ -3,6 +3,7 @@ const path = require('path');
 const fs = require('fs');
 const cors = require('cors');
 const dotenv = require('dotenv');
+const mongoose = require('mongoose');
 const logger = require('./config/logger');
 const connectDB = require('./config/db');
 const authRoutes = require('./routes/authRoutes');
@@ -41,7 +42,11 @@ if (process.env.NODE_ENV !== 'production') {
   app.use(cors());
 }
 app.use(express.json());
+const mongoSanitize = require('./middleware/MongoSanitizeMiddleware');
+app.use(mongoSanitize);
 app.use(requestLogger);
+const maintenanceModeMiddleware = require('./middleware/maintenanceModeMiddleware');
+app.use(maintenanceModeMiddleware);
 app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
 
 // Mount Swagger UI documentation
@@ -50,6 +55,14 @@ const swaggerDocument = require('./config/swagger.json');
 app.use('/api/docs', swaggerUi.serve, swaggerUi.setup(swaggerDocument));
 
 // Routes
+app.get('/api/health', (req, res) => {
+  res.json({
+    status: 'healthy',
+    database: mongoose.connection.readyState === 1 ? 'connected' : 'disconnected',
+    uptime: Math.round(process.uptime())
+  });
+});
+
 app.use('/api/auth', authRoutes);
 app.use('/api/agencies', agencyRoutes);
 app.use('/api/medicines', medicineRoutes);
@@ -88,32 +101,37 @@ app.get("*", (req, res) => {
   }
 });
 
-// Seed Initial Admin and Staff Users if they don't exist
+// Seed Initial Admin User if they don't exist
 const seedUsers = async () => {
   try {
     const userCount = await User.countDocuments();
     if (userCount === 0) {
-      console.log('No users found. Seeding initial Admin and Staff users...');
+      console.log('No users found. Seeding initial Admin user...');
       
       // Create Admin
-      await User.create({
+      const admin = await User.create({
         name: 'Krupesh Admin',
         email: 'admin@kashtbhanjan.com',
-        password: 'admin123', // Will be hashed via pre-save hook
-        role: 'admin'
-      });
-
-      // Create Staff
-      await User.create({
-        name: 'Staff Member',
-        email: 'staff@kashtbhanjan.com',
-        password: 'staff123', // Will be hashed via pre-save hook
-        role: 'staff'
+        password: 'Admin@123', // Will be hashed via pre-save hook
+        role: 'admin',
+        isActive: true,
+        isPrimaryAdmin: true,
+        needsPasswordReset: true,
+        tokenVersion: 1
       });
 
       console.log('Seeding completed successfully!');
-      console.log('Admin credentials: admin@kashtbhanjan.com / admin123');
-      console.log('Staff credentials: staff@kashtbhanjan.com / staff123');
+      console.log('Admin credentials: admin@kashtbhanjan.com / Admin@123');
+
+      // Write to chained audit logs
+      const { logSystemAction } = require('./config/AuditService');
+      await logSystemAction(null, {
+        actionType: 'User Seeded',
+        module: 'Security',
+        entityType: 'User',
+        entityId: admin._id,
+        remarks: 'Admin user account seeded successfully on database initialization.'
+      });
     }
   } catch (error) {
     console.error(`Error seeding users: ${error.message}`);
@@ -1531,29 +1549,128 @@ const seedPurchases = async () => {
   }
 };
 
+let serverInstance;
+
 // Start Server
 const startServer = async () => {
-  await connectDB();
+  const startupBegin = Date.now();
+  try {
+    // 1. Environment Validation
+    validateEnvironment();
 
-  const PORT = process.env.PORT || 5000;
-  app.listen(PORT, async () => {
-    logger.info(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
-    
-    // Run startup diagnostics health checks
-    const { runStartupHealthChecks } = require('./config/StartupHealthValidationService');
+    // 2. Database Connection
+    await connectDB().catch(err => {
+      logger.error(`Database connection failed: ${err.message}`);
+    });
+
+    // 3. Folder Validation & Startup Health Checks
+    const { runStartupHealthChecks, getSystemStatus, getBootFailureReason } = require('./config/StartupHealthValidationService');
     await runStartupHealthChecks();
 
-    // Seed database
-    await seedUsers();
-    await seedAgencies();
-    await seedMedicines();
-    await seedPurchases();
+    const bootStatus = getSystemStatus();
 
-    // Initialize and run Phase 5 components
-    await initializeSettings();
-    await runMigrations();
-    startBackgroundJobs();
-  });
+    if (bootStatus === 'RECOVERY_ONLY' || bootStatus === 'CRITICAL') {
+      logger.error(`SYSTEM BOOTED IN RESTRICTED RECOVERY MODE: ${getBootFailureReason()}`);
+      
+      // Auto-enable maintenance mode to ensure business routes are intercepted
+      try {
+        const { enableMaintenanceMode } = require('./config/MaintenanceModeService');
+        await enableMaintenanceMode(`Recovery Mode: ${getBootFailureReason()}`);
+      } catch (maintErr) {
+        logger.error(`Failed to enable maintenance mode during recovery boot: ${maintErr.message}`);
+      }
+    } else {
+      // 4. Admin Seeding (only if DB is healthy)
+      await seedUsers();
+
+      // 5. Single Admin Integrity Validation
+      const userCount = await User.countDocuments();
+      if (userCount !== 1) {
+        throw new Error(`Single Admin Integrity Violation: Expected exactly 1 user account in database, found ${userCount}.`);
+      }
+      const primaryAdmin = await User.findOne({ isPrimaryAdmin: true }).select('+password');
+      if (!primaryAdmin) {
+        throw new Error('Single Admin Integrity Violation: Primary administrator account not found.');
+      }
+      if (!primaryAdmin.isActive) {
+        throw new Error('Single Admin Integrity Violation: Primary administrator account is deactivated.');
+      }
+      if (!primaryAdmin.password || primaryAdmin.password.trim() === '') {
+        throw new Error('Single Admin Integrity Violation: Password hash is missing or corrupted.');
+      }
+      if (primaryAdmin.needsPasswordReset === undefined) {
+        throw new Error('Single Admin Integrity Violation: needsPasswordReset state is undefined.');
+      }
+      if (!primaryAdmin.email || primaryAdmin.email.trim() === '') {
+        throw new Error('Single Admin Integrity Violation: Administrator email/username is empty.');
+      }
+      logger.info('Single Admin Integrity Validation: PASSED.');
+
+      if (process.env.NODE_ENV !== 'production') {
+        logger.info('Development mode detected: seeding agency, medicine, and purchase dummy data...');
+        await seedAgencies();
+        await seedMedicines();
+        await seedPurchases();
+      }
+
+      // 6. Database Migrations & settings initialization
+      await initializeSettings();
+      await runMigrations();
+    }
+
+    // 7. HTTP Server Start (Always run server to ensure Recovery UI access)
+    const PORT = process.env.PORT || 5000;
+    serverInstance = app.listen(PORT, () => {
+      logger.info(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
+      
+      // 8. Start Background Jobs
+      if (bootStatus !== 'RECOVERY_ONLY' && bootStatus !== 'CRITICAL') {
+        startBackgroundJobs();
+      }
+
+      logger.info(`Startup completed in ${Date.now() - startupBegin}ms`);
+    });
+  } catch (error) {
+    logger.error(`CRITICAL STARTUP ERROR: ${error.message}`);
+    process.exit(1);
+  }
 };
 
 startServer();
+
+// Graceful Shutdown Handler
+const gracefulShutdown = async (signal) => {
+  logger.info(`${signal} received. Starting graceful shutdown...`);
+  if (serverInstance) {
+    serverInstance.close(async () => {
+      logger.info('HTTP server closed.');
+      try {
+        await mongoose.connection.close(false);
+        logger.info('MongoDB connection closed.');
+        process.exit(0);
+      } catch (err) {
+        logger.error(`Error during database disconnection: ${err.message}`);
+        process.exit(1);
+      }
+    });
+  } else {
+    process.exit(0);
+  }
+};
+
+process.on('SIGINT', () => gracefulShutdown('SIGINT'));
+process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
+
+process.on('unhandledRejection', (reason, promise) => {
+  logger.error('Unhandled Promise Rejection at:', promise, 'reason:', reason);
+  if (process.env.NODE_ENV === 'production') {
+    process.exit(1);
+  }
+});
+
+process.on('uncaughtException', (error) => {
+  logger.error('Uncaught Exception thrown:', error);
+  if (process.env.NODE_ENV === 'production') {
+    process.exit(1);
+  }
+});

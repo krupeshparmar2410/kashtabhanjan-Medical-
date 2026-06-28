@@ -60,6 +60,23 @@ const handleFailedLogin = async (email, ipAddress, userAgent) => {
       browser: userAgent
     });
 
+    // Write to chained audit log
+    await logSystemAction({
+      ip: ipAddress,
+      headers: { 'user-agent': userAgent },
+      method: 'POST',
+      originalUrl: '/api/auth/login'
+    }, {
+      actionType: loginStatus === 'Locked' ? 'User Account Locked' : 'User Login Failure',
+      module: 'Security',
+      entityType: 'User',
+      entityId: user._id,
+      status: 'Failed',
+      remarks: loginStatus === 'Locked' 
+        ? `Account locked out due to ${MAX_FAILED_ATTEMPTS} consecutive login failures.`
+        : `Failed login attempt. Fail count: ${user.failedLoginAttempts}`
+    });
+
     return loginStatus;
   } else {
     // Log non-existing user attempt
@@ -70,6 +87,22 @@ const handleFailedLogin = async (email, ipAddress, userAgent) => {
       ipAddress,
       browser: userAgent
     });
+
+    // Write to chained audit log
+    await logSystemAction({
+      ip: ipAddress,
+      headers: { 'user-agent': userAgent },
+      method: 'POST',
+      originalUrl: '/api/auth/login'
+    }, {
+      actionType: 'User Login Failure',
+      module: 'Security',
+      entityType: 'User',
+      entityId: null,
+      status: 'Failed',
+      remarks: `Failed login attempt for non-existing email: ${email}`
+    });
+
     return 'Failed';
   }
 };
