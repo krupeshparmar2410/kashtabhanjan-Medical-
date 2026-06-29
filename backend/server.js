@@ -47,7 +47,7 @@ app.use(mongoSanitize);
 app.use(requestLogger);
 const maintenanceModeMiddleware = require('./middleware/maintenanceModeMiddleware');
 app.use(maintenanceModeMiddleware);
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Mount Swagger UI documentation
 const swaggerUi = require('swagger-ui-express');

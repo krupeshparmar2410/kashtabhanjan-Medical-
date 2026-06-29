@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
 const logger = require('./logger');
+const RestoreSession = require('../models/RestoreSession');
 
 const modelsList = {
   User: require('../models/User'),
