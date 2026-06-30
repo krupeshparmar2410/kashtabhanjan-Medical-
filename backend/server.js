@@ -38,9 +38,28 @@ validateEnvironment();
 const app = express();
 
 // Middleware
-if (process.env.NODE_ENV !== 'production') {
-  app.use(cors());
-}
+// CORS configuration – allow only the Vercel frontend in production
+const allowedOrigins = [
+  'https://kashtabhanjan-medical.vercel.app',
+  'http://localhost:5173'
+];
+
+const corsOptions = {
+  origin: function (origin, callback) {
+    if (!origin) return callback(null, true);
+
+    if (allowedOrigins.includes(origin)) {
+      return callback(null, true);
+    }
+
+    return callback(null, false);
+  },
+  methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+  credentials: true
+};
+
+app.use(cors(corsOptions));
+app.options('*', cors(corsOptions));
 app.use(express.json());
 const mongoSanitize = require('./middleware/MongoSanitizeMiddleware');
 app.use(mongoSanitize);
@@ -107,7 +126,7 @@ const seedUsers = async () => {
     const userCount = await User.countDocuments();
     if (userCount === 0) {
       console.log('No users found. Seeding initial Admin user...');
-      
+
       // Create Admin
       const admin = await User.create({
         name: 'Krupesh Admin',
@@ -144,7 +163,7 @@ const seedAgencies = async () => {
     const count = await Agency.countDocuments();
     if (count === 0) {
       console.log('No agencies found. Seeding 10 dummy agencies...');
-      
+
       // Find an admin user to link as creator
       const adminUser = await User.findOne({ role: 'admin' });
       const creatorId = adminUser ? adminUser._id : null;
@@ -431,10 +450,10 @@ const seedMedicines = async () => {
     const count = await Medicine.countDocuments();
     if (count === 0) {
       console.log('No medicines found. Seeding 25 dummy medicines...');
-      
+
       const adminUser = await User.findOne({ role: 'admin' });
       const creatorId = adminUser ? adminUser._id : null;
-      
+
       const agencies = await Agency.find({ isDeleted: false });
       if (agencies.length === 0 || !creatorId) {
         console.error('Cannot seed medicines: Ensure admin user and agencies are seeded first.');
@@ -1288,17 +1307,17 @@ const seedPurchases = async () => {
     const SupplierPayment = require('./models/SupplierPayment');
     const AgencyLedger = require('./models/AgencyLedger');
     const InventorySnapshot = require('./models/InventorySnapshot');
-    
+
     const count = await Purchase.countDocuments();
     if (count > 0) return;
 
     console.log('No purchases found. Seeding 15 dummy purchases, batches, payments, ledger, and snapshots...');
-    
+
     const adminUser = await User.findOne({ role: 'admin' });
     const creatorId = adminUser ? adminUser._id : null;
     const agencies = await Agency.find({ isDeleted: false });
     const medicines = await Medicine.find({ isDeleted: false });
-    
+
     if (agencies.length === 0 || medicines.length === 0 || !creatorId) {
       console.error('Cannot seed purchases: Missing dependencies');
       return;
@@ -1309,43 +1328,43 @@ const seedPurchases = async () => {
       const isPosted = i <= 10; // 1 to 10 are Posted, 11 to 15 are Drafts
       const agencyIndex = (i - 1) % agencies.length;
       const agency = agencies[agencyIndex];
-      
+
       const purchaseNumber = `PUR${String(i).padStart(6, '0')}`;
       const invoiceNumber = `INV-${20260600 + i}`;
       const purchaseDate = new Date();
       // stagger dates back in time
       purchaseDate.setDate(purchaseDate.getDate() - (15 - i));
-      
+
       const creditDays = agency.creditDays || 30;
       const dueDate = new Date(purchaseDate.getTime() + creditDays * 24 * 60 * 60 * 1000);
-      
+
       // select 2 medicines
       const med1 = medicines[(i * 2) % medicines.length];
       const med2 = medicines[(i * 2 + 1) % medicines.length];
-      
+
       // pricing
       const qty1 = 50 + (i * 2);
       const qty2 = 30 + (i * 3);
       const free1 = i % 3 === 0 ? 5 : 0;
       const free2 = 0;
-      
+
       const item1Price = med1.purchasePrice || 10;
       const item2Price = med2.purchasePrice || 20;
-      
+
       const subTotal1 = qty1 * item1Price;
       const subTotal2 = qty2 * item2Price;
       const billAmount = subTotal1 + subTotal2;
-      
+
       const gstRate1 = med1.gstPercentage || 12;
       const gstRate2 = med2.gstPercentage || 12;
       const gst1 = subTotal1 * (gstRate1 / 100);
       const gst2 = subTotal2 * (gstRate2 / 100);
       const gstAmount = gst1 + gst2;
-      
+
       const grandTotal = billAmount + gstAmount;
       const paidAmount = isPosted ? (i % 2 === 0 ? Math.round(grandTotal / 2) : 0) : 0;
       const pendingAmount = grandTotal - paidAmount;
-      
+
       const purchase = await Purchase.create({
         purchaseNumber,
         invoiceNumber,
@@ -1402,7 +1421,7 @@ const seedPurchases = async () => {
         // Create Batches
         const processItem = async (pItem, medObj) => {
           const totalQty = pItem.quantity + pItem.freeQuantity;
-          
+
           // Determine status
           const today = new Date();
           const expiryDate = new Date(pItem.expiryDate);
@@ -1467,7 +1486,7 @@ const seedPurchases = async () => {
     for (let p = 1; p <= 10; p++) {
       const agency = agencies[p % agencies.length];
       const amountPaid = 2000 + (p * 500);
-      
+
       const paymentNumber = `PAY${String(p).padStart(6, '0')}`;
       const paymentDate = new Date();
       paymentDate.setDate(paymentDate.getDate() - (10 - p));
@@ -1571,7 +1590,7 @@ const startServer = async () => {
 
     if (bootStatus === 'RECOVERY_ONLY' || bootStatus === 'CRITICAL') {
       logger.error(`SYSTEM BOOTED IN RESTRICTED RECOVERY MODE: ${getBootFailureReason()}`);
-      
+
       // Auto-enable maintenance mode to ensure business routes are intercepted
       try {
         const { enableMaintenanceMode } = require('./config/MaintenanceModeService');
@@ -1622,7 +1641,7 @@ const startServer = async () => {
     const PORT = process.env.PORT || 5000;
     serverInstance = app.listen(PORT, () => {
       logger.info(`Server running in ${process.env.NODE_ENV || 'development'} mode on port ${PORT}`);
-      
+
       // 8. Start Background Jobs
       if (bootStatus !== 'RECOVERY_ONLY' && bootStatus !== 'CRITICAL') {
         startBackgroundJobs();
