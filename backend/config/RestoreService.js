@@ -2,6 +2,7 @@ const fs = require('fs');
 const path = require('path');
 const mongoose = require('mongoose');
 const logger = require('./logger');
+const RestoreSession = require('../models/RestoreSession');
 const SystemBackup = require('../models/SystemBackup');
 const SystemState = require('../models/SystemState');
 const { getSetting } = require('./SettingsService');
@@ -146,6 +147,15 @@ const performStagingRestoreAndSwap = async (operatorId, fileName, confirmationPh
     },
     { upsert: true }
   );
+
+  // Create a RestoreSession entry to track this restore operation
+  await RestoreSession.create({
+    sessionId: restoreSessionId,
+    backupId: dumpData.backupId,
+    checksum: fileChecksum,
+    status: 'IN_PROGRESS',
+    systemStateRef: (await SystemState.findOne({ key: 'SYSTEM_STATE' }))._id
+  });
 
   const db = mongoose.connection.db;
   const collections = await db.listCollections().toArray();

@@ -144,7 +144,7 @@ const Login = ({ onLoginSuccess }) => {
         <div className="login-footer">
           <p>Secure Administrator & Staff Access Portal</p>
           <div className="demo-credentials">
-            <span>Demo: admin@kashtbhanjan.com / admin123</span>
+            <span>Demo: admin@kashtbhanjan.com / Admin@123</span>
           </div>
         </div>
       </div>

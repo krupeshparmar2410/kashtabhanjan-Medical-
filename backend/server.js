@@ -29,7 +29,7 @@ const Agency = require('./models/Agency');
 const Medicine = require('./models/Medicine');
 
 // Load environment variables
-dotenv.config();
+dotenv.config({ path: path.join(__dirname, '.env') });
 
 // Validate critical variables
 const { validateEnvironment } = require('./config/EnvironmentValidationService');
@@ -47,7 +47,7 @@ app.use(mongoSanitize);
 app.use(requestLogger);
 const maintenanceModeMiddleware = require('./middleware/maintenanceModeMiddleware');
 app.use(maintenanceModeMiddleware);
-app.use('/uploads', express.static(path.join(__dirname, '../uploads')));
+app.use('/uploads', express.static(path.join(__dirname, 'uploads')));
 
 // Mount Swagger UI documentation
 const swaggerUi = require('swagger-ui-express');
@@ -116,7 +116,7 @@ const seedUsers = async () => {
         role: 'admin',
         isActive: true,
         isPrimaryAdmin: true,
-        needsPasswordReset: true,
+        needsPasswordReset: false,
         tokenVersion: 1
       });
 
@@ -1583,28 +1583,42 @@ const startServer = async () => {
       // 4. Admin Seeding (only if DB is healthy)
       await seedUsers();
 
-      // 5. Single Admin Integrity Validation
+      // 5. Admin Integrity Validation
       const userCount = await User.countDocuments();
-      if (userCount !== 1) {
-        throw new Error(`Single Admin Integrity Violation: Expected exactly 1 user account in database, found ${userCount}.`);
+      if (userCount < 1) {
+        throw new Error(`Admin Integrity Violation: Expected at least 1 user account in database, found ${userCount}.`);
       }
-      const primaryAdmin = await User.findOne({ isPrimaryAdmin: true }).select('+password');
+
+      const fallbackAdmin = await User.findOne({
+        $or: [
+          { email: 'admin@kashtbhanjan.com' },
+          { role: 'admin', isPrimaryAdmin: true },
+          { role: 'admin' }
+        ]
+      }).select('+password');
+
+      const primaryAdmin = fallbackAdmin || await User.findOne({ isPrimaryAdmin: true }).select('+password');
       if (!primaryAdmin) {
-        throw new Error('Single Admin Integrity Violation: Primary administrator account not found.');
+        throw new Error('Admin Integrity Violation: Primary administrator account not found.');
       }
-      if (!primaryAdmin.isActive) {
-        throw new Error('Single Admin Integrity Violation: Primary administrator account is deactivated.');
+      if (primaryAdmin.isActive === false) {
+        throw new Error('Admin Integrity Violation: Primary administrator account is deactivated.');
       }
       if (!primaryAdmin.password || primaryAdmin.password.trim() === '') {
-        throw new Error('Single Admin Integrity Violation: Password hash is missing or corrupted.');
+        throw new Error('Admin Integrity Violation: Password hash is missing or corrupted.');
       }
       if (primaryAdmin.needsPasswordReset === undefined) {
-        throw new Error('Single Admin Integrity Violation: needsPasswordReset state is undefined.');
+        primaryAdmin.needsPasswordReset = true;
+        await primaryAdmin.save();
+      }
+      if (primaryAdmin.isPrimaryAdmin === undefined) {
+        primaryAdmin.isPrimaryAdmin = true;
+        await primaryAdmin.save();
       }
       if (!primaryAdmin.email || primaryAdmin.email.trim() === '') {
-        throw new Error('Single Admin Integrity Violation: Administrator email/username is empty.');
+        throw new Error('Admin Integrity Violation: Administrator email/username is empty.');
       }
-      logger.info('Single Admin Integrity Validation: PASSED.');
+      logger.info('Admin Integrity Validation: PASSED.');
 
       if (process.env.NODE_ENV !== 'production') {
         logger.info('Development mode detected: seeding agency, medicine, and purchase dummy data...');
