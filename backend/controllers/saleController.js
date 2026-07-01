@@ -708,7 +708,7 @@ const createSale = async (req, res, next) => {
       } catch (err) {
         // Application-level compensation (manual rollback) for standalone MongoDB deployments
         const { getStatus } = require('../config/TransactionManager');
-        const hasTxSupport = getStatus().transactionSupport;
+        const hasTxSupport = (await getStatus()).transactionSupport;
         if (!hasTxSupport) {
           logger.warn(`Stand-alone database rollback: compensating createSale failure for invoice ${invoiceNumber || 'N/A'}...`);
 
@@ -1264,7 +1264,7 @@ const createSalesReturn = async (req, res, next) => {
 
       } catch (err) {
         const { getStatus } = require('../config/TransactionManager');
-        const hasTxSupport = getStatus().transactionSupport;
+        const hasTxSupport = (await getStatus()).transactionSupport;
         if (!hasTxSupport) {
           logger.warn(`Stand-alone database rollback: compensating createSalesReturn failure for return ${returnNumber || 'N/A'}...`);
 

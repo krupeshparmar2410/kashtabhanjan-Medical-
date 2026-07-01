@@ -517,7 +517,7 @@ const postPurchase = async (req, res) => {
 
       } catch (err) {
         const { getStatus } = require('../config/TransactionManager');
-        const hasTxSupport = getStatus().transactionSupport;
+        const hasTxSupport = (await getStatus()).transactionSupport;
         if (!hasTxSupport) {
           const logger = require('../config/logger');
           logger.warn(`Stand-alone database rollback: compensating postPurchase failure for purchase ${purchase.purchaseNumber || 'N/A'}...`);
@@ -684,7 +684,7 @@ const deletePurchase = async (req, res) => {
 
         } catch (err) {
           const { getStatus } = require('../config/TransactionManager');
-          const hasTxSupport = getStatus().transactionSupport;
+          const hasTxSupport = (await getStatus()).transactionSupport;
           if (!hasTxSupport) {
             const logger = require('../config/logger');
             logger.warn(`Stand-alone database rollback: compensating deletePurchase failure for purchase ${purchase.purchaseNumber || 'N/A'}...`);

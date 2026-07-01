@@ -40,7 +40,15 @@ const detectSupport = async () => {
   }
 };
 
-const getStatus = () => {
+/**
+ * Returns the current transaction support status.
+ * If detection has not yet run, it awaits detectSupport() first.
+ * @returns {Promise<{transactionSupport:boolean, dbType:string, replicaSetType:string}>}
+ */
+const getStatus = async () => {
+  if (!initialized) {
+    await detectSupport();
+  }
   return {
     transactionSupport,
     dbType,

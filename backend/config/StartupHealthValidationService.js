@@ -584,7 +584,8 @@ const runStartupHealthChecks = async () => {
 
   // 6. Verify MongoDB Replica Set Status
   const { getStatus } = require('./TransactionManager');
-  const txStatus = getStatus();
+  const txStatus = await getStatus();
+  console.log(`Transaction Support: ${txStatus.transactionSupport}, DB Type: ${txStatus.dbType}, Replica Set Type: ${txStatus.replicaSetType}`);
   if (!txStatus.transactionSupport) {
     logger.warn('WARNING: Database is not running in Replica Set mode. Running in standalone degraded mode.');
     if (systemStatus === 'HEALTHY') {
