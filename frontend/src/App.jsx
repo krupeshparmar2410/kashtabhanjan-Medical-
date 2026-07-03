@@ -29,6 +29,9 @@ import PrescriptionsAdmin from './pages/PrescriptionsAdmin';
 import RemindersAdmin from './pages/RemindersAdmin';
 import SystemDiagnostics from './pages/SystemDiagnostics';
 import Layout from './components/Layout';
+import InvoicesList from './pages/Sales/InvoicesList';
+import NewInvoice from './pages/Sales/NewInvoice';
+import InvoiceDetail from './pages/Sales/InvoiceDetail';
 import ProtectedRoute from './components/ProtectedRoute';
 import { authAPI } from './services/api';
 
@@ -292,6 +295,42 @@ function App() {
             </ProtectedRoute>
           }
         />
+
+      {/* Invoices List */}
+      <Route
+        path="/sales/invoices"
+        element={
+          <ProtectedRoute>
+            <Layout user={user} handleLogout={handleLogout}>
+              <InvoicesList />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* New Invoice (Add) */}
+      <Route
+        path="/sales/add"
+        element={
+          <ProtectedRoute>
+            <Layout user={user} handleLogout={handleLogout}>
+              <NewInvoice />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Invoice Detail */}
+      <Route
+        path="/sales/invoices/:id"
+        element={
+          <ProtectedRoute>
+            <Layout user={user} handleLogout={handleLogout}>
+              <InvoiceDetail />
+            </Layout>
+          </ProtectedRoute>
+        }
+      />
 
         {/* Customer Directory */}
         <Route

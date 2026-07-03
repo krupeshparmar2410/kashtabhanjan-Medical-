@@ -1,16 +1,16 @@
 import React, { useState, useEffect } from 'react';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { 
-  FaPills, 
-  FaHandshake, 
-  FaShoppingCart, 
-  FaBoxes, 
-  FaReceipt, 
-  FaUsers, 
-  FaWallet, 
-  FaChartLine, 
-  FaCog, 
-  FaSignOutAlt, 
+import {
+  FaPills,
+  FaHandshake,
+  FaShoppingCart,
+  FaBoxes,
+  FaReceipt,
+  FaUsers,
+  FaWallet,
+  FaChartLine,
+  FaCog,
+  FaSignOutAlt,
   FaTimes,
   FaBan,
   FaCashRegister,
@@ -19,7 +19,8 @@ import {
   FaFileMedical,
   FaBell,
   FaUndo,
-  FaHeartbeat
+  FaHeartbeat,
+  FaFileInvoiceDollar
 } from 'react-icons/fa';
 import { MdDashboard, MdLocalPharmacy } from 'react-icons/md';
 import { inventoryAPI } from '../services/api';
@@ -55,6 +56,7 @@ const Sidebar = ({ isOpen, onClose, handleLogout }) => {
     { id: 'billing', name: 'Billing', icon: <FaReceipt />, path: '/billing' },
     { id: 'sales-returns', name: 'Sales Returns', icon: <FaUndo />, path: '/sales-returns' },
     { id: 'prescriptions', name: 'Prescriptions', icon: <FaFileMedical />, path: '/prescriptions' },
+    { id: 'invoices', name: 'Invoices', icon: <FaFileInvoiceDollar />, path: '/sales/invoices' },
     { id: 'reminders', name: 'Refill Reminders', icon: <FaBell />, path: '/reminders' },
     { id: 'customers', name: 'Customers', icon: <FaUsers />, path: '/customers' },
     { id: 'credit', name: 'Credit Accounts', icon: <FaWallet />, path: '/credit' },
