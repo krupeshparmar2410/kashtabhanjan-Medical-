@@ -6,17 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "vite build",
-<<<<<<< HEAD:package.json
-    "start": "node backend/server.js",
-    "dev": "concurrently --names \"SERVER,CLIENT\" --prefix-colors \"blue,green\" \"npm:dev:backend\" \"npm:dev:frontend\"",
-    "dev:frontend": "vite",
-    "dev:backend": "node backend/server.js",
-    "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0",
-    "preview": "vite preview"
-=======
     "preview": "vite preview",
     "lint": "eslint . --ext js,jsx --report-unused-disable-directives --max-warnings 0"
->>>>>>> origin/main:frontend/package.json
   },
   "dependencies": {
     "axios": "^1.7.2",
