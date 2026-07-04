@@ -1,0 +1,13 @@
+{
+  "name": "kashtabhanjan-medical",
+  "private": true,
+  "version": "1.0.0",
+  "scripts": {
+    "dev": "concurrently --names \"SERVER,CLIENT\" --prefix-colors \"blue,green\" \"npm:dev:backend\" \"npm:dev:frontend\"",
+    "dev:backend": "cd backend && npm run dev",
+    "dev:frontend": "cd frontend && npm run dev"
+  },
+  "devDependencies": {
+    "concurrently": "^10.0.3"
+  }
+}
