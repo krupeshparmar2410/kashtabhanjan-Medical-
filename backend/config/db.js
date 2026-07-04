@@ -4,8 +4,8 @@ const logger = require('./logger');
 
 const connectDB = async () => {
   const atlasURI = process.env.MONGO_URI;
-  const localURI = 'mongodb://127.0.0.1:27017/medical_shop';
-  
+  const localURI = 'mongodb://127.0.0.1:27017/medical_shop?replicaSet=rs0';
+
   let connected = false;
   let dbType = 'Local';
   let replicaSet = 'standalone';
@@ -40,7 +40,7 @@ const connectDB = async () => {
           reason = err.message;
         }
         logger.error(`MongoDB Atlas connection attempt ${attempt} failed: ${reason}`);
-        
+
         if (attempt < 3) {
           logger.info(`Retrying Atlas connection in ${delay}ms...`);
           await new Promise(resolve => setTimeout(resolve, delay));
