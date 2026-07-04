@@ -62,7 +62,7 @@ const InvoicesList = () => {
           <p>Manage sales invoices, returns, and reprints.</p>
         </div>
         <div className="purchase-buttons-wrapper">
-          <button className="btn-primary-action" onClick={() => navigate('/sales/add')}>
+          <button className="btn-primary-action" onClick={() => navigate('/billing')}>
             <FiPlus /> New Invoice
           </button>
         </div>

@@ -1,0 +1,146 @@
+/* InvoiceDetail styles */
+
+.invoice-detail-container {
+  display: flex;
+  flex-direction: column;
+  gap: 24px;
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
+  box-shadow: var(--shadow-sm);
+  padding: 24px;
+}
+
+.invoice-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  flex-wrap: wrap;
+  gap: 12px;
+  border-bottom: 1px solid var(--border-color);
+  padding-bottom: 16px;
+}
+
+.invoice-header-left {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+}
+
+.invoice-header-right {
+  text-align: right;
+}
+
+.invoice-header h1 {
+  font-size: 22px;
+  font-weight: 800;
+  color: var(--primary-color);
+  margin: 0;
+}
+
+.invoice-actions {
+  display: flex;
+  gap: 12px;
+}
+
+.btn-action {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  background-color: var(--primary-color);
+  color: #fff;
+  border: none;
+  border-radius: var(--border-radius-sm);
+  padding: 8px 12px;
+  cursor: pointer;
+  transition: background-color var(--transition-fast);
+}
+
+.btn-action:hover {
+  background-color: var(--primary-hover);
+}
+
+.customer-section,
+.items-section,
+.summary-section {
+  background-color: var(--card-bg);
+  border: 1px solid var(--border-color);
+  border-radius: var(--border-radius-md);
+  padding: 20px;
+  box-shadow: var(--shadow-sm);
+}
+
+.customer-section h2,
+.items-section h2,
+.summary-section h2 {
+  font-size: 18px;
+  font-weight: 700;
+  color: var(--text-primary);
+  margin-bottom: 12px;
+}
+
+.invoice-table {
+  width: 100%;
+  border-collapse: collapse;
+}
+
+.invoice-table th,
+.invoice-table td {
+  border: 1px solid var(--border-color);
+  padding: 8px 12px;
+  text-align: left;
+  font-size: 13px;
+}
+
+.invoice-table th {
+  background-color: var(--bg-color);
+  font-weight: 600;
+  color: var(--text-primary);
+}
+
+.summary-card {
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+}
+
+.summary-card p {
+  margin: 0;
+  font-size: 14px;
+  color: var(--text-primary);
+}
+
+.grand-total {
+  font-size: 16px;
+  font-weight: 800;
+  color: var(--primary-color);
+}
+
+.status-pill {
+  display: inline-block;
+  padding: 2px 8px;
+  border-radius: var(--border-radius-sm);
+  font-size: 12px;
+  font-weight: 600;
+  text-transform: capitalize;
+}
+
+.status-pill.draft {
+  background-color: var(--warning-bg);
+  color: var(--warning-color);
+}
+
+.status-pill.completed {
+  background-color: var(--success-bg);
+  color: var(--success-color);
+}
+
+.status-pill.cancelled {
+  background-color: var(--error-bg);
+  color: var(--error-color);
+}
+
+.status-pill.returned {
+  background-color: var(--error-bg);
+  color: var(--error-color);
+}

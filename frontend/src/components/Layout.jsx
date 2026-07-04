@@ -24,7 +24,7 @@ const Layout = ({ children, user, handleLogout }) => {
     if (path.startsWith('/recalls')) return 'recalls';
     if (path.startsWith('/cash-closing')) return 'cash-closing';
     if (path.startsWith('/audit-logs')) return 'audit-logs';
-    if (path.startsWith('/maintenance')) return 'maintenance';
+    if (path.startsWith('/sales')) return 'sales';
     return 'dashboard';
   };
 
@@ -54,8 +54,8 @@ const Layout = ({ children, user, handleLogout }) => {
         return 'Inventory Dashboard';
       case 'billing':
         return 'Point of Sale (Billing)';
-      default:
-        return activeItem.charAt(0).toUpperCase() + activeItem.slice(1);
+    case 'sales':
+      return 'Invoice Details';
     }
   };
 
