@@ -85,7 +85,7 @@
 }
 
 .user-role.admin {
-  background-color: rgba(25, 118, 210, 0.1);
+  background-color: rgba(var(--primary-color-rgb), 0.1);
   color: var(--primary-color);
 }
 

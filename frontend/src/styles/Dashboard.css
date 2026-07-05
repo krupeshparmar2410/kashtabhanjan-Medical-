@@ -20,7 +20,7 @@
 
 /* Welcome Banner */
 .welcome-banner {
-  background: linear-gradient(135deg, #0F172A 0%, #1E293B 100%);
+  background: linear-gradient(135deg, var(--sidebar-bg) 0%, var(--sidebar-hover) 100%);
   color: #FFFFFF;
   padding: 24px 30px;
   border-radius: var(--border-radius-lg);
@@ -48,7 +48,7 @@
   font-size: 13px;
   font-weight: 600;
   color: var(--primary-color);
-  border: 1px solid rgba(25, 118, 210, 0.25);
+  border: 1px solid rgba(var(--primary-color-rgb), 0.25);
   backdrop-filter: blur(4px);
 }
 
@@ -92,7 +92,7 @@
 }
 .card-medicines .stat-icon-wrapper {
   color: var(--primary-color);
-  background-color: rgba(25, 118, 210, 0.1);
+  background-color: rgba(var(--primary-color-rgb), 0.1);
 }
 
 .card-agencies::after {
@@ -193,7 +193,7 @@
 
 .quick-action-btn:hover {
   border-color: var(--primary-color);
-  background-color: rgba(25, 118, 210, 0.02);
+  background-color: rgba(var(--primary-color-rgb), 0.02);
   transform: translateY(-2px);
   box-shadow: var(--shadow-sm);
   color: var(--primary-color);
@@ -251,7 +251,7 @@
 }
 
 .badge-info {
-  background-color: rgba(25, 118, 210, 0.1);
+  background-color: rgba(var(--primary-color-rgb), 0.1);
   color: var(--primary-color);
   padding: 4px 10px;
   border-radius: 20px;
@@ -404,7 +404,7 @@ code {
 }
 
 .placeholder-badge {
-  background-color: rgba(25, 118, 210, 0.1);
+  background-color: rgba(var(--primary-color-rgb), 0.1);
   color: var(--primary-color);
   padding: 6px 14px;
   border-radius: 20px;

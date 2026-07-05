@@ -79,7 +79,7 @@
   font-size: 18px;
 }
 
-.stat-med-total .stat-icon { color: var(--primary-color); background-color: rgba(25, 118, 210, 0.1); }
+.stat-med-total .stat-icon { color: var(--primary-color); background-color: rgba(var(--primary-color-rgb), 0.1); }
 .stat-med-active .stat-icon { color: var(--success-color); background-color: var(--success-bg); }
 .stat-med-low .stat-icon { color: var(--error-color); background-color: var(--error-bg); }
 .stat-med-rx .stat-icon { color: #8B5CF6; background-color: rgba(139, 92, 246, 0.1); }
@@ -124,13 +124,13 @@
   align-items: center;
   gap: 8px;
   transition: all var(--transition-fast);
-  box-shadow: 0 4px 10px rgba(25, 118, 210, 0.2);
+  box-shadow: 0 4px 10px rgba(var(--primary-color-rgb), 0.2);
 }
 
 .add-med-btn:hover {
   background-color: var(--primary-hover);
   transform: translateY(-1px);
-  box-shadow: 0 6px 14px rgba(25, 118, 210, 0.3);
+  box-shadow: 0 6px 14px rgba(var(--primary-color-rgb), 0.3);
 }
 
 .filters-row {
@@ -349,7 +349,7 @@
 }
 
 .card-action-btn.view { color: var(--primary-color); }
-.card-action-btn.view:hover { background-color: rgba(25, 118, 210, 0.05); border-color: var(--primary-color); }
+.card-action-btn.view:hover { background-color: rgba(var(--primary-color-rgb), 0.05); border-color: var(--primary-color); }
 .card-action-btn.edit { color: var(--warning-color); }
 .card-action-btn.edit:hover { background-color: var(--warning-bg); border-color: var(--warning-color); }
 .card-action-btn.delete { color: var(--error-color); }

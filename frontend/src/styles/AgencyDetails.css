@@ -33,7 +33,7 @@
   width: 70px;
   height: 70px;
   border-radius: var(--border-radius-md);
-  background-color: rgba(25, 118, 210, 0.1);
+  background-color: rgba(var(--primary-color-rgb), 0.1);
   color: var(--primary-color);
   display: flex;
   align-items: center;

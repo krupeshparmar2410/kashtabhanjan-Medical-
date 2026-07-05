@@ -33,7 +33,7 @@
 .pharmacy-icon {
   font-size: 28px;
   color: var(--primary-color);
-  background: rgba(25, 118, 210, 0.15);
+  background: rgba(var(--primary-color-rgb), 0.15);
   padding: 4px;
   border-radius: var(--border-radius-sm);
   display: flex;
@@ -107,13 +107,13 @@
 
 .menu-item:hover {
   background-color: var(--sidebar-hover);
-  color: #FFFFFF;
+  color: var(--sidebar-text);
 }
 
 .menu-item.active {
   background-color: var(--sidebar-active);
-  color: #FFFFFF;
-  box-shadow: 0 4px 12px rgba(25, 118, 210, 0.3);
+  color: var(--sidebar-text);
+  box-shadow: 0 4px 12px rgba(var(--primary-color-rgb), 0.3);
 }
 
 .logout-btn {

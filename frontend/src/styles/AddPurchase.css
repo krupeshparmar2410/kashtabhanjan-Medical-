@@ -171,7 +171,7 @@
 }
 
 .btn-add-row:hover {
-  background-color: rgba(25, 118, 210, 0.05);
+  background-color: rgba(var(--primary-color-rgb), 0.05);
 }
 
 /* Totals workspace panel */

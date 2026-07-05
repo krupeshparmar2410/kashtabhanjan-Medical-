@@ -132,7 +132,7 @@
 .form-group select:focus,
 .form-group textarea:focus {
   border-color: var(--primary-color);
-  box-shadow: 0 0 0 3px rgba(25, 118, 210, 0.1);
+  box-shadow: 0 0 0 3px rgba(var(--primary-color-rgb), 0.1);
 }
 
 .form-group input:disabled {
@@ -193,13 +193,13 @@
   font-size: 14px;
   cursor: pointer;
   transition: all var(--transition-fast);
-  box-shadow: 0 4px 10px rgba(25, 118, 210, 0.2);
+  box-shadow: 0 4px 10px rgba(var(--primary-color-rgb), 0.2);
 }
 
 .form-submit-btn:hover:not(:disabled) {
   background-color: var(--primary-hover);
   transform: translateY(-1px);
-  box-shadow: 0 6px 14px rgba(25, 118, 210, 0.3);
+  box-shadow: 0 6px 14px rgba(var(--primary-color-rgb), 0.3);
 }
 
 .form-submit-btn:disabled {

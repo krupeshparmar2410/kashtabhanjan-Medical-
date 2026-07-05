@@ -1,6 +1,8 @@
 import React, { useState, useEffect, useRef } from 'react';
 import { medicineAPI, customerAPI, saleAPI, prescriptionAPI, inventoryAPI } from '../services/api';
 import '../styles/AddAgency.css'; // Reuse form card stylings
+import '../styles/Billing.css';
+import { MdShoppingCart } from 'react-icons/md';
 
 const Billing = () => {
   // Billing form states
@@ -408,10 +410,10 @@ const Billing = () => {
 
   const adminOverrideReason = `Credit limit bypass override authorized for ${selectedCustomer?.name}`;
 
-  return (
+  return ( <>
     <div className="card-container">
       <div className="form-card" style={{ maxWidth: '100%' }}>
-        <div className="form-header" style={{ background: 'linear-gradient(135deg, #0d9488 0%, #115e59 100%)' }}>
+        <div className="billing__header">
           <h2>Point of Sale (POS) Billing Counter</h2>
           <p>Real-time GST compliance, FEFO allocations, and loyalty ledger entries</p>
         </div>
@@ -425,8 +427,8 @@ const Billing = () => {
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
             
             {/* Search customer & barcode */}
-            <div style={{ display: 'flex', gap: '16px', background: '#f8fafc', padding: '16px', borderRadius: '10px' }}>
-              <div style={{ flex: 1, position: 'relative' }}>
+            <div style={{ display: 'flex', gap: '16px' }}>
+              <div className="billing__card" style={{ flex: 1, position: 'relative' }}>
                 <label className="form-label">Search Customer (Walk-In or Name/Phone)</label>
                 <input
                   type="text"
@@ -451,7 +453,7 @@ const Billing = () => {
                 )}
               </div>
 
-              <div style={{ flex: 1 }}>
+              <div className="billing__card" style={{ flex: 1 }}>
                 <form onSubmit={handleBarcodeSubmit}>
                   <label className="form-label">Scan Barcode</label>
                   <input
@@ -467,7 +469,7 @@ const Billing = () => {
             </div>
 
             {/* Medicine item Search and suggestions */}
-            <div style={{ position: 'relative' }}>
+            <div className="billing__card" style={{ position: 'relative' }}>
               <label className="form-label">Add Medicine to Invoice</label>
               <input
                 type="text"
@@ -526,7 +528,7 @@ const Billing = () => {
             <div style={{ overflowX: 'auto' }}>
               <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
                 <thead>
-                  <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1', color: '#475569' }}>
+                  <tr className="billing__table-header">
                     <th style={{ padding: '10px', textAlign: 'left' }}>Medicine Name</th>
                     <th style={{ padding: '10px', textAlign: 'center', width: '15%' }}>FEFO Batch</th>
                     <th style={{ padding: '10px', textAlign: 'center', width: '12%' }}>Quantity</th>
@@ -540,9 +542,7 @@ const Billing = () => {
                 <tbody>
                   {cart.length === 0 ? (
                     <tr>
-                      <td colSpan="8" style={{ padding: '30px', textAlign: 'center', color: '#94a3b8' }}>
-                        No items added to billing cart yet. Search medicines or scan barcode.
-                      </td>
+                      <td colSpan="8"><div className="billing__empty-state"><MdShoppingCart className="icon" /><span>No items added to billing cart yet. Search medicines or scan barcode.</span></div></td>
                     </tr>
                   ) : (
                     cart.map((item, idx) => {
@@ -686,7 +686,7 @@ const Billing = () => {
           </div>
 
           {/* Checkout Controls Column */}
-          <div style={{ background: '#f8fafc', padding: '20px', borderRadius: '12px', display: 'flex', flexDirection: 'column', gap: '16px', alignSelf: 'start' }}>
+          <div className="billing__summary-card">
             <h3 style={{ borderBottom: '1px solid #cbd5e1', paddingBottom: '8px', margin: 0, color: '#1e293b' }}>Summary & Payments</h3>
             
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
@@ -863,14 +863,7 @@ const Billing = () => {
               />
             </div>
 
-            <button
-              type="button"
-              className="btn btn-primary"
-              style={{ width: '100%', background: 'linear-gradient(135deg, #0d9488 0%, #0f766e 100%)', border: 'none', padding: '12px' }}
-              onClick={() => handleCheckout()}
-            >
-              Checkout & Print Invoice
-            </button>
+            <button type="button" className="btn-primary-full" onClick={() => handleCheckout()}>Checkout & Print Invoice</button>
             
             {checkoutResult && (
               <button
@@ -936,8 +929,8 @@ const Billing = () => {
           </div>
         </div>
       )}
-    </div>
-  );
+
+  </>);
 };
 
 export default Billing;
