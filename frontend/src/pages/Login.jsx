@@ -2,6 +2,7 @@ import React, { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { MdLocalPharmacy, MdEmail, MdLock, MdVisibility, MdVisibilityOff } from 'react-icons/md';
 import { authAPI } from '../services/api';
+import '../styles/Login.css';
 
 const Login = ({ onLoginSuccess }) => {
   const [email, setEmail] = useState('');
@@ -13,7 +14,6 @@ const Login = ({ onLoginSuccess }) => {
 
   const navigate = useNavigate();
 
-  // Basic validation rules
   const validateForm = () => {
     if (!email) {
       setError('Email is required');
@@ -46,19 +46,15 @@ const Login = ({ onLoginSuccess }) => {
 
     try {
       const data = await authAPI.login(email, password);
-      
-      // Store token and user details in local storage
       localStorage.setItem('token', data.token);
       localStorage.setItem('user', JSON.stringify(data.user));
 
       setSuccess('Login successful! Redirecting...');
-      
-      // Notify parent component to update state
+
       if (onLoginSuccess) {
         onLoginSuccess(data.user);
       }
 
-      // Redirect to dashboard
       setTimeout(() => {
         navigate('/');
       }, 1000);
@@ -75,33 +71,24 @@ const Login = ({ onLoginSuccess }) => {
   };
 
   return (
-    <div className="login-container-page">
-      <div className="login-card">
-        <div className="login-header">
-          <div className="login-logo-circle">
-            <MdLocalPharmacy className="login-logo-icon" />
+    <div className="login-page">
+      <div className="login-panel">
+        <div className="login-brand">
+          <div className="login-brand-icon">
+            <MdLocalPharmacy />
           </div>
           <h1>Kashtbhanjan Medical</h1>
           <p>Medical Shop Management System</p>
         </div>
 
-        {error && (
-          <div className="login-alert alert-error">
-            <span>{error}</span>
-          </div>
-        )}
-
-        {success && (
-          <div className="login-alert alert-success">
-            <span>{success}</span>
-          </div>
-        )}
+        {error && <div className="login-msg login-msg-error">{error}</div>}
+        {success && <div className="login-msg login-msg-success">{success}</div>}
 
         <form onSubmit={handleSubmit} className="login-form">
-          <div className="form-group">
+          <div className="field">
             <label htmlFor="email">Email Address</label>
-            <div className="input-wrapper">
-              <MdEmail className="input-icon" />
+            <div className="field-box">
+              <span className="field-icon"><MdEmail /></span>
               <input
                 type="email"
                 id="email"
@@ -109,14 +96,15 @@ const Login = ({ onLoginSuccess }) => {
                 value={email}
                 onChange={(e) => setEmail(e.target.value)}
                 disabled={isLoading}
+                autoComplete="email"
               />
             </div>
           </div>
 
-          <div className="form-group">
+          <div className="field">
             <label htmlFor="password">Password</label>
-            <div className="input-wrapper">
-              <MdLock className="input-icon" />
+            <div className="field-box">
+              <span className="field-icon"><MdLock /></span>
               <input
                 type={showPassword ? 'text' : 'password'}
                 id="password"
@@ -124,28 +112,28 @@ const Login = ({ onLoginSuccess }) => {
                 value={password}
                 onChange={(e) => setPassword(e.target.value)}
                 disabled={isLoading}
+                autoComplete="current-password"
               />
               <button
                 type="button"
-                className="password-toggle"
+                className="field-toggle"
                 onClick={() => setShowPassword(!showPassword)}
                 disabled={isLoading}
+                tabIndex={-1}
               >
                 {showPassword ? <MdVisibilityOff /> : <MdVisibility />}
               </button>
             </div>
           </div>
 
-          <button type="submit" className="login-submit-btn" disabled={isLoading}>
-            {isLoading ? <div className="spinner"></div> : 'Sign In'}
+          <button type="submit" className="login-btn" disabled={isLoading}>
+            {isLoading ? <span className="login-spinner"></span> : 'Sign In'}
           </button>
         </form>
 
         <div className="login-footer">
-          <p>Secure Administrator & Staff Access Portal</p>
-          <div className="demo-credentials">
-            <span>Demo: admin@kashtbhanjan.com / Admin@123</span>
-          </div>
+          <div className="login-divider"><span>Secure Administrator & Staff Access Portal</span></div>
+          <div className="login-demo">Demo: admin@kashtbhanjan.com / Admin@123</div>
         </div>
       </div>
     </div>
