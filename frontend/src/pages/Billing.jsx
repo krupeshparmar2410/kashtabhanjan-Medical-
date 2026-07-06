@@ -9,22 +9,22 @@ const Billing = () => {
   const [customerQuery, setCustomerQuery] = useState('');
   const [customerSuggestions, setCustomerSuggestions] = useState([]);
   const [selectedCustomer, setSelectedCustomer] = useState(null);
-  
+
   const [barcode, setBarcode] = useState('');
   const [medQuery, setMedQuery] = useState('');
   const [medSuggestions, setMedSuggestions] = useState([]);
-  
+
   const [cart, setCart] = useState([]);
   const [isGstInclusive, setIsGstInclusive] = useState(true);
   const [discountType, setDiscountType] = useState('None');
   const [discountValue, setDiscountValue] = useState(0);
-  
+
   const [paymentMethod, setPaymentMethod] = useState('Cash');
   const [paymentDetails, setPaymentDetails] = useState({ cashAmount: 0, upiAmount: 0, cardAmount: 0, creditAmount: 0 });
   const [redeemLoyalty, setRedeemLoyalty] = useState(false);
   const [creditDays, setCreditDays] = useState(30);
   const [remarks, setRemarks] = useState('');
-  
+
   const [prescriptionNumber, setPrescriptionNumber] = useState('');
   const [doctorName, setDoctorName] = useState('');
   const [doctorLicense, setDoctorLicense] = useState('');
@@ -39,7 +39,7 @@ const Billing = () => {
   const [adminBypassModal, setAdminBypassModal] = useState(false);
   const [adminUsername, setAdminUsername] = useState('');
   const [adminPassword, setAdminPassword] = useState('');
-  
+
   const [error, setError] = useState('');
   const [success, setSuccess] = useState('');
 
@@ -158,7 +158,7 @@ const Billing = () => {
       if (batchRes.success) {
         // Fetch batches via inventory FEFO API
         const data = await inventoryAPI.getFEFO(med._id);
-        
+
         if (!data.success || data.batches.length === 0) {
           setSelectedMedicineForSubs(med);
           // Load substitution generic matches
@@ -401,7 +401,7 @@ const Billing = () => {
         </body>
       </html>
     `);
-    
+
     // Fetch HTML directly from api
     saleAPI.getInvoicePDF(checkoutResult._id).then(res => {
       printWindow.document.getElementById('pdf-view').innerHTML = res.pdfHtml;
@@ -410,7 +410,7 @@ const Billing = () => {
 
   const adminOverrideReason = `Credit limit bypass override authorized for ${selectedCustomer?.name}`;
 
-  return ( <>
+  return (<>
     <div className="card-container">
       <div className="form-card" style={{ maxWidth: '100%' }}>
         <div className="billing__header">
@@ -422,10 +422,10 @@ const Billing = () => {
         {success && <div className="success-message" style={{ margin: '16px' }}>{success}</div>}
 
         <div className="form-grid" style={{ gridTemplateColumns: '2fr 1fr', padding: '20px', gap: '24px' }}>
-          
+
           {/* Cart Details Column */}
           <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
-            
+
             {/* Search customer & barcode */}
             <div style={{ display: 'flex', gap: '16px' }}>
               <div className="billing__card" style={{ flex: 1, position: 'relative' }}>
@@ -621,7 +621,7 @@ const Billing = () => {
             {checkRestrictedSchedules() && (
               <div style={{ background: '#eff6ff', border: '1px solid #bfdbfe', padding: '16px', borderRadius: '10px', display: 'flex', flexDirection: 'column', gap: '12px' }}>
                 <strong style={{ color: '#1d4ed8', fontSize: '14px' }}>Pharmacy Compliance Fields (Rx Validation Required)</strong>
-                
+
                 {selectedCustomer && selectedCustomer.customerType === 'Registered' && (
                   <div style={{ marginBottom: '4px' }}>
                     <label className="form-label">Link Approved Doctor Prescription</label>
@@ -688,7 +688,7 @@ const Billing = () => {
           {/* Checkout Controls Column */}
           <div className="billing__summary-card">
             <h3 style={{ borderBottom: '1px solid #cbd5e1', paddingBottom: '8px', margin: 0, color: '#1e293b' }}>Summary & Payments</h3>
-            
+
             <div style={{ display: 'flex', justifyContent: 'space-between', fontSize: '13px' }}>
               <span>Tax Configuration:</span>
               <button
@@ -741,7 +741,7 @@ const Billing = () => {
                 <span style={{ color: '#166534', fontWeight: 600 }}>Loyalty Summary:</span><br />
                 Available Points: {selectedCustomer.loyaltyPoints}<br />
                 Estimated Earn: {Math.floor(totals.grandTotal / 100)} Points
-                
+
                 {selectedCustomer.loyaltyPoints > 0 && (
                   <div style={{ marginTop: '6px' }}>
                     <label style={{ display: 'flex', alignItems: 'center', gap: '6px', cursor: 'pointer' }}>
@@ -864,7 +864,7 @@ const Billing = () => {
             </div>
 
             <button type="button" className="btn-primary-full" onClick={() => handleCheckout()}>Checkout & Print Invoice</button>
-            
+
             {checkoutResult && (
               <button
                 type="button"
@@ -929,7 +929,7 @@ const Billing = () => {
           </div>
         </div>
       )}
-
+    </div>
   </>);
 };
 
