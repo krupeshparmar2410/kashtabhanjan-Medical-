@@ -147,10 +147,10 @@ const CustomersList = () => {
   return (
     <div className="card-container">
       <div className="form-card" style={{ maxWidth: '100%' }}>
-        <div className="form-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'linear-gradient(135deg, #1e293b 0%, #0f172a 100%)' }}>
+        <div className="form-header" style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', background: 'linear-gradient(135deg, var(--sidebar-bg), var(--sidebar-hover))', padding: '1rem 1.5rem', borderRadius: '8px' }}>
           <div>
-            <h2>Registered Customer Directory</h2>
-            <p>Maintain loyalty ratios, outstanding credit, and profile audits</p>
+            <h2 style={{ margin: 0, color: '#fff' }}>Registered Customer Directory</h2>
+            <p style={{ margin: '0.25rem 0 0', color: '#e5e7eb', fontSize: '0.9rem' }}>Maintain loyalty ratios, outstanding credit, and profile audits</p>
           </div>
           <button className="btn btn-primary" style={{ background: '#0d9488', border: 'none' }} onClick={openAddModal}>
             Register Customer
@@ -185,10 +185,10 @@ const CustomersList = () => {
         </div>
 
         {/* Customers Table */}
-        <div style={{ overflowX: 'auto', padding: '20px' }}>
+        <div style={{ background: 'var(--card-bg)', border: '1px solid var(--border-color)', borderRadius: '10px', overflowX: 'auto', padding: '20px', margin: '20px 0' }}>
           <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
             <thead>
-              <tr style={{ background: '#f1f5f9', borderBottom: '2px solid #cbd5e1', color: '#475569', textAlign: 'left' }}>
+              <tr style={{ background: 'var(--sidebar-bg)', color: '#fff', textAlign: 'left' }}>
                 <th style={{ padding: '12px' }}>Customer Name</th>
                 <th style={{ padding: '12px' }}>Phone Number</th>
                 <th style={{ padding: '12px' }}>Loyalty Points</th>

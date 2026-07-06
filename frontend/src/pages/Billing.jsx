@@ -45,24 +45,7 @@ const Billing = () => {
 
   const barcodeInputRef = useRef(null);
 
-  // Load default Walk-In customer on load
-  useEffect(() => {
-    const loadDefaultCustomer = async () => {
-      try {
-        const res = await customerAPI.searchCustomers('');
-        if (res.success && res.customers.length > 0) {
-          const walkin = res.customers.find(c => c.customerType === 'Walk-In');
-          if (walkin) {
-            setSelectedCustomer(walkin);
-            setCustomerQuery(walkin.name);
-          }
-        }
-      } catch (err) {
-        console.error('Failed to load default customer:', err);
-      }
-    };
-    loadDefaultCustomer();
-  }, []);
+  // Load default Walk-In customer on load (Removed per requirements)
 
   // Fetch customer approved prescriptions when customer is selected
   useEffect(() => {
@@ -79,6 +62,41 @@ const Billing = () => {
       setSelectedPrescriptionId('');
     }
   }, [selectedCustomer]);
+
+  // New Phone + Name manual inputs
+  const [billPhone, setBillPhone] = useState('');
+  const [billName, setBillName] = useState('');
+
+  // Handle auto-create or fetch by phone
+  const handleFindOrCreateCustomer = async () => {
+    if (!billPhone || billPhone.trim() === '') {
+      setError('Phone number is required to link or create a profile.');
+      return;
+    }
+
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(billPhone.trim())) {
+      setError('Invalid phone number. Must be exactly 10 digits.');
+      return;
+    }
+
+    if (!billName || billName.trim() === '') {
+      setError('Customer name is required to link or create a profile.');
+      return;
+    }
+    
+    try {
+      const res = await customerAPI.findOrCreateByPhone({ phone: billPhone.trim(), name: billName.trim() });
+      if (res.success && res.customer) {
+        setSelectedCustomer(res.customer);
+        setSuccess(`Customer ${res.customer.name} linked successfully.`);
+        setTimeout(() => setSuccess(''), 2000);
+        setError('');
+      }
+    } catch (err) {
+      setError(err.response?.data?.message || 'Failed to auto-select/create customer');
+    }
+  };
 
   // Search customers
   const handleCustomerSearch = async (val) => {
@@ -287,6 +305,11 @@ const Billing = () => {
     setError('');
     setSuccess('');
 
+    if (!selectedCustomer) {
+      setError('Customer name and phone number are required to complete checkout.');
+      return;
+    }
+
     if (cart.length === 0) {
       setError('Your billing cart is empty.');
       return;
@@ -428,17 +451,18 @@ const Billing = () => {
 
             {/* Search customer & barcode */}
             <div style={{ display: 'flex', gap: '16px' }}>
+              {/* Retaining the existing Autocomplete Field for existing customers */}
               <div className="billing__card" style={{ flex: 1, position: 'relative' }}>
-                <label className="form-label">Search Customer (Walk-In or Name/Phone)</label>
+                <label className="form-label">Search Existing Customer</label>
                 <input
                   type="text"
                   className="form-input"
-                  placeholder="Type customer name or mobile number..."
+                  placeholder="Type customer name or mobile..."
                   value={customerQuery}
                   onChange={(e) => handleCustomerSearch(e.target.value)}
                 />
                 {customerSuggestions.length > 0 && (
-                  <div className="autocomplete-dropdown" style={{ position: 'absolute', zIndex: 10, width: '100%', background: '#fff', border: '1px solid #cbd5e1', borderRadius: '6px', top: '70px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}>
+                  <div className="autocomplete-dropdown" style={{ position: 'absolute', zIndex: 10, width: '100%', background: 'var(--bg-color)', border: '1px solid #cbd5e1', borderRadius: '6px', top: '70px', boxShadow: '0 4px 6px -1px rgb(0 0 0 / 0.1)' }}>
                     {customerSuggestions.map((cust) => (
                       <div
                         key={cust._id}
@@ -446,12 +470,72 @@ const Billing = () => {
                         style={{ padding: '10px 14px', cursor: 'pointer', borderBottom: '1px solid #f1f5f9' }}
                         onClick={() => selectCustomer(cust)}
                       >
-                        <strong>{cust.name}</strong> - {cust.phone} {cust.customerType === 'Walk-In' ? '(Cash Counter)' : `(Points: ${cust.loyaltyPoints})`}
+                        <strong>{cust.name}</strong> - {cust.phone} (Points: {cust.loyaltyPoints})
                       </div>
                     ))}
                   </div>
                 )}
               </div>
+
+              {/* New Manual Link / Auto-Create Field */}
+              <div className="billing__card" style={{ flex: 1 }}>
+                <label className="form-label">Quick Link (Phone & Name)</label>
+                <div style={{ display: 'flex', gap: '8px' }}>
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Phone No."
+                    value={billPhone}
+                    onChange={(e) => setBillPhone(e.target.value)}
+                    onBlur={() => {
+                      if (billPhone.trim().length >= 10) {
+                        handleFindOrCreateCustomer();
+                      }
+                    }}
+                  />
+                  <input
+                    type="text"
+                    className="form-input"
+                    placeholder="Optional Name"
+                    value={billName}
+                    onChange={(e) => setBillName(e.target.value)}
+                  />
+                  <button 
+                    type="button" 
+                    className="btn btn-primary"
+                    onClick={handleFindOrCreateCustomer}
+                    style={{ padding: '8px 12px' }}
+                  >
+                    Link
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            {/* Customer Selection Status Banner */}
+            <div className="billing__card" style={{ padding: '12px', background: selectedCustomer ? 'var(--success-bg)' : 'var(--bg-color)' }}>
+              {selectedCustomer ? (
+                <div style={{ fontSize: '13px', color: 'var(--primary-color)', fontWeight: 600 }}>
+                  Active: {selectedCustomer.name} - {selectedCustomer.phone} (Points: {selectedCustomer.loyaltyPoints || 0})
+                  <button 
+                    type="button"
+                    style={{ marginLeft: '12px', background: 'none', border: 'none', color: 'var(--error-color)', cursor: 'pointer', textDecoration: 'underline' }}
+                    onClick={() => {
+                      setSelectedCustomer(null);
+                      setBillPhone('');
+                      setBillName('');
+                      setCustomerQuery('');
+                    }}
+                  >
+                    Clear Link
+                  </button>
+                </div>
+              ) : (
+                <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+                  No customer linked. Sale will proceed as Anonymous.
+                </div>
+              )}
+            </div>
 
               <div className="billing__card" style={{ flex: 1 }}>
                 <form onSubmit={handleBarcodeSubmit}>
@@ -466,7 +550,6 @@ const Billing = () => {
                   />
                 </form>
               </div>
-            </div>
 
             {/* Medicine item Search and suggestions */}
             <div className="billing__card" style={{ position: 'relative' }}>

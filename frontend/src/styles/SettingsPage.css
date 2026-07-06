@@ -1,0 +1,274 @@
+/* Settings Page — matches site-wide teal / dark theme (Global.css tokens) */
+
+.settings-page {
+    display: flex;
+    flex-direction: column;
+    gap: 24px;
+    max-width: 1100px;
+    margin: 0 auto;
+    animation: settingsFadeIn 0.35s ease-out;
+    padding-bottom: 90px;
+    /* keeps content clear of the sticky action bar */
+}
+
+@keyframes settingsFadeIn {
+    from {
+        opacity: 0;
+        transform: translateY(6px);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0);
+    }
+}
+
+/* ---------- Header ---------- */
+.settings-header {
+    background: linear-gradient(135deg, var(--sidebar-bg), var(--sidebar-hover));
+    color: #fff;
+    padding: 22px 28px;
+    border-radius: var(--border-radius-lg);
+    display: flex;
+    align-items: center;
+    gap: 16px;
+    box-shadow: var(--shadow-md);
+}
+
+.settings-header__icon {
+    width: 46px;
+    height: 46px;
+    min-width: 46px;
+    border-radius: var(--border-radius-md);
+    background: rgba(var(--primary-color-rgb), 0.25);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 20px;
+    color: var(--primary-color);
+}
+
+.settings-header h2 {
+    font-size: 20px;
+    font-weight: 700;
+    margin: 0;
+}
+
+.settings-header p {
+    font-size: 13px;
+    color: #CBD5E1;
+    margin: 4px 0 0;
+}
+
+/* ---------- Feedback banners ---------- */
+.settings-alert {
+    padding: 12px 16px;
+    border-radius: var(--border-radius-md);
+    font-size: 13px;
+    font-weight: 600;
+    border: 1px solid transparent;
+}
+
+.settings-alert.error {
+    background: var(--error-bg);
+    color: var(--error-color);
+    border-color: rgba(220, 38, 38, 0.25);
+}
+
+.settings-alert.success {
+    background: var(--success-bg);
+    color: var(--success-color);
+    border-color: rgba(22, 163, 74, 0.25);
+}
+
+/* ---------- Card grid ---------- */
+.settings-grid {
+    display: grid;
+    grid-template-columns: repeat(auto-fit, minmax(320px, 1fr));
+    gap: 20px;
+}
+
+.settings-grid.full-width {
+    grid-template-columns: 1fr;
+}
+
+.settings-card {
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-sm);
+    padding: 22px 24px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+    transition: box-shadow var(--transition-fast);
+}
+
+.settings-card:hover {
+    box-shadow: var(--shadow-md);
+}
+
+.settings-card__title {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    font-size: 14px;
+    font-weight: 700;
+    color: var(--text-primary);
+    letter-spacing: 0.2px;
+}
+
+.settings-card__title .icon-badge {
+    width: 30px;
+    height: 30px;
+    border-radius: 8px;
+    background: rgba(var(--primary-color-rgb), 0.12);
+    color: var(--primary-color);
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    font-size: 14px;
+    flex-shrink: 0;
+}
+
+.settings-card__subtitle {
+    font-size: 12px;
+    color: var(--text-secondary);
+    margin-top: -10px;
+}
+
+/* ---------- Field layout ---------- */
+.settings-fields {
+    display: grid;
+    gap: 14px;
+}
+
+.settings-fields.cols-2 {
+    grid-template-columns: repeat(2, 1fr);
+}
+
+.settings-fields.cols-3 {
+    grid-template-columns: repeat(3, 1fr);
+}
+
+.settings-fields.cols-4 {
+    grid-template-columns: repeat(4, 1fr);
+}
+
+@media (max-width: 640px) {
+
+    .settings-fields.cols-2,
+    .settings-fields.cols-3,
+    .settings-fields.cols-4 {
+        grid-template-columns: 1fr;
+    }
+}
+
+.settings-field {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.settings-field label {
+    font-size: 11px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.4px;
+    color: var(--text-secondary);
+}
+
+.settings-field .unit-hint {
+    font-size: 10px;
+    font-weight: 500;
+    text-transform: none;
+    letter-spacing: 0;
+    color: #94A3B8;
+    margin-left: 4px;
+}
+
+.settings-field input,
+.settings-field select {
+    width: 100%;
+    padding: 10px 12px;
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-sm);
+    font-size: 14px;
+    font-weight: 600;
+    color: var(--text-primary);
+    background: #FFFFFF;
+    outline: none;
+    transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+}
+
+.settings-field input:focus,
+.settings-field select:focus {
+    border-color: var(--primary-color);
+    box-shadow: 0 0 0 3px rgba(var(--primary-color-rgb), 0.12);
+}
+
+.settings-field--prefix input {
+    text-transform: uppercase;
+    font-weight: 700;
+    letter-spacing: 0.5px;
+    color: var(--primary-hover);
+}
+
+/* ---------- Sticky action bar ---------- */
+.settings-action-bar {
+    position: sticky;
+    bottom: 16px;
+    margin-top: 4px;
+    background: var(--card-bg);
+    border: 1px solid var(--border-color);
+    border-radius: var(--border-radius-lg);
+    box-shadow: var(--shadow-lg);
+    padding: 14px 20px;
+    display: flex;
+    justify-content: flex-end;
+    gap: 12px;
+    z-index: 5;
+}
+
+.settings-btn {
+    padding: 10px 22px;
+    border-radius: var(--border-radius-md);
+    font-size: 13px;
+    font-weight: 700;
+    cursor: pointer;
+    border: none;
+    transition: all var(--transition-fast);
+}
+
+.settings-btn.reset {
+    background: transparent;
+    border: 1px solid var(--border-color);
+    color: var(--text-secondary);
+}
+
+.settings-btn.reset:hover {
+    background: #F1F5F9;
+    color: var(--text-primary);
+}
+
+.settings-btn.save {
+    background: var(--primary-color);
+    color: #fff;
+    box-shadow: 0 4px 10px rgba(var(--primary-color-rgb), 0.25);
+}
+
+.settings-btn.save:hover {
+    background: var(--primary-hover);
+    transform: translateY(-1px);
+    box-shadow: 0 6px 14px rgba(var(--primary-color-rgb), 0.35);
+}
+
+@media (max-width: 640px) {
+    .settings-action-bar {
+        flex-direction: column-reverse;
+    }
+
+    .settings-btn {
+        width: 100%;
+    }
+}

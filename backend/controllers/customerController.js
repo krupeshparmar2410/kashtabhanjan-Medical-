@@ -503,6 +503,57 @@ const getCustomerAnalytics = async (req, res, next) => {
   }
 };
 
+// @desc    Find customer by phone or create if not exists
+// @route   POST /api/customers/find-or-create
+// @access  Private
+const findOrCreateCustomerByPhone = async (req, res, next) => {
+  try {
+    const { name, phone } = req.body;
+
+    if (!phone || !/^\d{10}$/.test(phone.trim())) {
+      return res.status(400).json({ success: false, message: 'Valid 10-digit phone number is required' });
+    }
+
+    if (!name || name.trim() === '') {
+      return res.status(400).json({ success: false, message: 'Customer name is required' });
+    }
+
+    const cleanPhone = phone.trim();
+    const finalName = name.trim();
+
+    // 1. Try to find existing
+    let customer = await Customer.findOne({ phone: cleanPhone, customerType: 'Registered', isDeleted: false });
+
+    // 2. If not found, create new
+    if (!customer) {
+      const defaultLimit = getSetting('CREDIT_LIMIT_DEFAULT', 5000);
+
+      customer = await Customer.create({
+        customerType: 'Registered',
+        name: finalName,
+        phone: cleanPhone,
+        creditLimit: defaultLimit,
+        creditDays: 30,
+        createdBy: req.user.id
+      });
+
+      // Audit logs ONLY fire on actual creation
+      await logAudit(req.user.id, 'Customer Auto-Created', 'Customer', customer._id, null, customer, req.ip);
+
+      await CustomerActivity.create({
+        customerId: customer._id,
+        action: 'Profile Auto-Created',
+        description: `Customer account auto-registered via Billing for ${finalName}`,
+        performedBy: req.user.id
+      });
+    }
+
+    res.status(200).json({ success: true, customer });
+  } catch (error) {
+    next(error);
+  }
+};
+
 module.exports = {
   createCustomer,
   getCustomers,
@@ -515,5 +566,6 @@ module.exports = {
   getCustomerLoyaltyLedger,
   createCustomerPayment,
   getCustomerPayments,
-  getCustomerAnalytics
+  getCustomerAnalytics,
+  findOrCreateCustomerByPhone
 };

@@ -262,6 +262,10 @@ export const customerAPI = {
   getAnalytics: async (id) => {
     const response = await API.get(`/customers/${id}/analytics`);
     return response.data;
+  },
+  findOrCreateByPhone: async (data) => {
+    const response = await API.post('/customers/find-or-create', data);
+    return response.data;
   }
 };
 

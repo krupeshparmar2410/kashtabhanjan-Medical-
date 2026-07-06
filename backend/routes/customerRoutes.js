@@ -12,7 +12,8 @@ const {
   getCustomerLoyaltyLedger,
   createCustomerPayment,
   getCustomerPayments,
-  getCustomerAnalytics
+  getCustomerAnalytics,
+  findOrCreateCustomerByPhone
 } = require('../controllers/customerController');
 const { protect } = require('../middleware/authMiddleware');
 const { authorize } = require('../middleware/roleMiddleware');
@@ -20,6 +21,8 @@ const { checkPermission } = require('../middleware/PermissionMiddleware');
 
 // Protect all routes
 router.use(protect);
+
+router.post('/find-or-create', findOrCreateCustomerByPhone);
 
 router.get('/search', searchCustomers);
 
