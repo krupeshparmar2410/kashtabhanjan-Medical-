@@ -130,10 +130,10 @@ const Dashboard = ({ activeItem }) => {
 
   const stats = [
     {
-      title: 'Total Medicines',
-      value: totalMeds,
-      change: 'Active catalog items',
-      icon: <FaPills />,
+      title: "Today's Profit",
+      value: `₹${(salesKpis.todayProfit || 0).toLocaleString('en-IN', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`,
+      change: 'Calculated for today',
+      icon: <FaCoins />,
       colorClass: 'card-medicines'
     },
     {
