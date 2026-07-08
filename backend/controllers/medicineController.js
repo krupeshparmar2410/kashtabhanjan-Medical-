@@ -432,12 +432,24 @@ const deleteMedicine = async (req, res) => {
     }
 
     // Set soft-delete flags. Clear barcode to free up sparse unique index
+    const updateQuery = {
+      $set: {
+        isDeleted: true,
+        status: 'Inactive',
+        updatedBy: req.user.id
+      }
+    };
+
+    if (medicine.barcode != null) {
+      updateQuery.$unset = { barcode: 1 };
+    }
+
+    await Medicine.updateOne({ _id: medicine._id }, updateQuery);
+    
+    // Update local object for activity logging context
     medicine.isDeleted = true;
     medicine.status = 'Inactive';
-    medicine.barcode = null;
     medicine.updatedBy = req.user.id;
-    await medicine.save();
-
     await logActivity(
       medicine._id,
       'Medicine Deleted',
