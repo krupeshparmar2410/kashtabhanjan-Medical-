@@ -241,6 +241,10 @@ const getMedicineById = async (req, res) => {
 // @access  Private
 const createMedicine = async (req, res) => {
   try {
+    if (req.body.brandName) {
+      req.body.medicineName = req.body.brandName;
+    }
+
     const {
       medicineName,
       purchasePrice,
@@ -262,7 +266,7 @@ const createMedicine = async (req, res) => {
     }
 
     // Clean barcode
-    const cleanBarcode = barcode && barcode.trim() !== '' ? barcode.trim() : null;
+    const cleanBarcode = barcode && barcode.trim() !== '' ? barcode.trim() : undefined;
 
     // Check barcode unique if provided
     if (cleanBarcode) {
@@ -277,10 +281,14 @@ const createMedicine = async (req, res) => {
 
     const medicineData = {
       ...req.body,
-      barcode: cleanBarcode,
       medicineCode,
       createdBy: req.user.id
     };
+    if (cleanBarcode !== undefined) {
+      medicineData.barcode = cleanBarcode;
+    } else {
+      delete medicineData.barcode;
+    }
 
     const medicine = await Medicine.create(medicineData);
 
@@ -308,6 +316,9 @@ const createMedicine = async (req, res) => {
 // @access  Private
 const updateMedicine = async (req, res) => {
   try {
+    if (req.body.brandName) {
+      req.body.medicineName = req.body.brandName;
+    }
     let medicine = await Medicine.findOne({ _id: req.params.id, isDeleted: false });
 
     if (!medicine) {
@@ -340,7 +351,7 @@ const updateMedicine = async (req, res) => {
     }
 
     // Clean barcode
-    const cleanBarcode = barcode && barcode.trim() !== '' ? barcode.trim() : null;
+    const cleanBarcode = barcode && barcode.trim() !== '' ? barcode.trim() : undefined;
 
     // Check unique barcode if changing
     if (cleanBarcode && cleanBarcode !== medicine.barcode) {
@@ -359,9 +370,13 @@ const updateMedicine = async (req, res) => {
 
     const updatedData = {
       ...req.body,
-      barcode: cleanBarcode,
       updatedBy: req.user.id
     };
+    if (cleanBarcode !== undefined) {
+      updatedData.barcode = cleanBarcode;
+    } else {
+      delete updatedData.barcode;
+    }
 
     // Prevent direct code change
     delete updatedData.medicineCode;

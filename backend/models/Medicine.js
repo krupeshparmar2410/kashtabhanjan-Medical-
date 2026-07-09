@@ -21,15 +21,16 @@ const MedicineSchema = new mongoose.Schema(
     },
     medicineName: {
       type: String,
-      required: [true, 'Medicine name is required'],
       trim: true
     },
     genericName: {
       type: String,
+      required: [true, 'Generic name is required'],
       trim: true
     },
     brandName: {
       type: String,
+      required: [true, 'Brand name is required'],
       trim: true
     },
     description: {
@@ -62,7 +63,7 @@ const MedicineSchema = new mongoose.Schema(
       type: String,
       required: [true, 'Medicine form is required'],
       enum: {
-        values: ['Tablet', 'Capsule', 'Syrup', 'Injection', 'Cream', 'Ointment', 'Drops', 'Powder', 'Inhaler'],
+        values: ['Tablet', 'Capsule', 'Syrup', 'Injection', 'Cream', 'Ointment', 'Drops', 'Powder', 'Inhaler', 'Lotion', 'Gel', 'Soap', 'Respule', 'Ampule'],
         message: 'Invalid medicine form value'
       }
     },
@@ -155,8 +156,7 @@ const MedicineSchema = new mongoose.Schema(
     },
     barcode: {
       type: String,
-      trim: true,
-      default: null
+      trim: true
     },
     expiryAlertDays: {
       type: Number,

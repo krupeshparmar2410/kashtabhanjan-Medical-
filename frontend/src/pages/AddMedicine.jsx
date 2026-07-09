@@ -12,14 +12,12 @@ const AddMedicine = () => {
 
   // Form State
   const [formData, setFormData] = useState({
-    medicineName: '',
     genericName: '',
     brandName: '',
     description: '',
     category: '',
     manufacturer: '',
     agencyId: '',
-    strength: '',
     medicineForm: 'Tablet',
     purchasePrice: 0,
     sellingPrice: 0,
@@ -108,8 +106,12 @@ const AddMedicine = () => {
   const validateForm = () => {
     const tempErrors = {};
 
-    if (!formData.medicineName.trim()) {
-      tempErrors.medicineName = 'Medicine Name is required';
+    if (!formData.brandName.trim()) {
+      tempErrors.brandName = 'Brand Name is required';
+    }
+
+    if (!formData.genericName.trim()) {
+      tempErrors.genericName = 'Generic Name is required';
     }
 
     if (!formData.medicineForm) {
@@ -227,41 +229,7 @@ const AddMedicine = () => {
           <div className="form-grid-3">
             
             <div className="form-group form-group-half">
-              <label>Medicine Name<span className="required-star">*</span></label>
-              <input
-                type="text"
-                name="medicineName"
-                placeholder="e.g. Paracetamol 500mg"
-                value={formData.medicineName}
-                onChange={handleChange}
-              />
-              {errors.medicineName && <span className="field-error-msg">{errors.medicineName}</span>}
-            </div>
-
-            <div className="form-group">
-              <label>Strength / Dosage</label>
-              <input
-                type="text"
-                name="strength"
-                placeholder="e.g. 500mg, 5ml"
-                value={formData.strength}
-                onChange={handleChange}
-              />
-            </div>
-
-            <div className="form-group">
-              <label>Generic Chemical Name</label>
-              <input
-                type="text"
-                name="genericName"
-                placeholder="e.g. Acetaminophen"
-                value={formData.genericName}
-                onChange={handleChange}
-              />
-            </div>
-
-            <div className="form-group">
-              <label>Brand Name</label>
+              <label>Brand Name<span className="required-star">*</span></label>
               <input
                 type="text"
                 name="brandName"
@@ -269,6 +237,19 @@ const AddMedicine = () => {
                 value={formData.brandName}
                 onChange={handleChange}
               />
+              {errors.brandName && <span className="field-error-msg">{errors.brandName}</span>}
+            </div>
+
+            <div className="form-group form-group-half">
+              <label>Generic name and strength<span className="required-star">*</span></label>
+              <input
+                type="text"
+                name="genericName"
+                placeholder="e.g. Acetaminophen 500mg"
+                value={formData.genericName}
+                onChange={handleChange}
+              />
+              {errors.genericName && <span className="field-error-msg">{errors.genericName}</span>}
             </div>
 
             <div className="form-group">
@@ -309,6 +290,11 @@ const AddMedicine = () => {
                 <option value="Drops">Drops</option>
                 <option value="Powder">Powder</option>
                 <option value="Inhaler">Inhaler</option>
+                <option value="Lotion">Lotion</option>
+                <option value="Gel">Gel</option>
+                <option value="Soap">Soap</option>
+                <option value="Respule">Respule</option>
+                <option value="Ampule">Ampule</option>
               </select>
               {errors.medicineForm && <span className="field-error-msg">{errors.medicineForm}</span>}
             </div>

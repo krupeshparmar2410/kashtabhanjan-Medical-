@@ -1,5 +1,10 @@
-require('dotenv').config();
 const mongoose = require('mongoose');
+const dotenv = require('dotenv');
+const path = require('path');
+
+// Load environment config
+dotenv.config({ path: path.join(__dirname, '../.env') });
+
 const connectDB = require('../config/db');
 const Medicine = require('../models/Medicine');
 
@@ -12,7 +17,7 @@ const fixNullBarcodes = async () => {
     // Find documents where barcode is null and unset the field to remove it
     const result = await Medicine.updateMany(
       { barcode: null },
-      { $unset: { barcode: "" } }
+      { $unset: { barcode: '' } }
     );
 
     console.log(`Successfully fixed ${result.modifiedCount} documents (Matched: ${result.matchedCount}).`);
