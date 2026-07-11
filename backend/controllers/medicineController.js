@@ -1,6 +1,20 @@
 const Medicine = require('../models/Medicine');
 const MedicineActivity = require('../models/MedicineActivity');
 const Agency = require('../models/Agency');
+const InventoryBatch = require('../models/InventoryBatch');
+
+// Helper to generate the next batch code
+const generateNextBatchCode = async () => {
+  const latest = await InventoryBatch.findOne({}, {}, { sort: { createdAt: -1 } });
+  let num = 1;
+  if (latest && latest.batchCode) {
+    const match = latest.batchCode.match(/\d+/);
+    if (match) {
+      num = parseInt(match[0], 10) + 1;
+    }
+  }
+  return `BAT${String(num).padStart(6, '0')}`;
+};
 
 // Helper to log medicine activities
 const logActivity = async (medicineId, action, description, userId) => {
@@ -299,6 +313,47 @@ const createMedicine = async (req, res) => {
       `Medicine registered with code ${medicine.medicineCode} by ${req.user.name}`,
       req.user.id
     );
+
+    // Initial stock batch creation
+    if (medicine.currentStock > 0) {
+      try {
+        const batchCode = await generateNextBatchCode();
+        
+        let status = 'Active';
+        const today = new Date();
+        const expiryDate = new Date(req.body.expiryDate);
+        if (expiryDate <= today) {
+          status = 'Expired';
+        } else {
+          const daysToExpiry = (expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
+          if (daysToExpiry <= (medicine.expiryAlertDays || 90)) {
+            status = 'Near Expiry';
+          }
+        }
+
+        const newBatch = new InventoryBatch({
+          batchCode,
+          medicineId: medicine._id,
+          batchNumber: req.body.batchNumber,
+          manufacturingDate: req.body.manufacturingDate || today,
+          expiryDate: req.body.expiryDate,
+          originalQuantity: medicine.currentStock,
+          availableQuantity: medicine.currentStock,
+          reservedQuantity: 0,
+          purchasePrice: medicine.purchasePrice,
+          sellingPrice: medicine.sellingPrice,
+          mrp: medicine.mrp,
+          status,
+          isSaleBlocked: status === 'Expired',
+          createdBy: req.user.id
+        });
+
+        await newBatch.save();
+      } catch (batchErr) {
+        console.error('Failed to create initial stock batch:', batchErr.message);
+        // Do not fail the medicine creation
+      }
+    }
 
     res.status(201).json({ success: true, medicine });
   } catch (error) {

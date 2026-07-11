@@ -27,6 +27,9 @@ const AddMedicine = () => {
     minimumStockLevel: 10,
     reorderLevel: 20,
     currentStock: 0,
+    batchNumber: '',
+    manufacturingDate: '',
+    expiryDate: '',
     unitType: 'Tablet',
     packSize: 1,
     prescriptionRequired: 'No',
@@ -149,6 +152,18 @@ const AddMedicine = () => {
 
     if (formData.currentStock < 0) {
       tempErrors.currentStock = 'Current stock cannot be negative';
+    } else if (formData.currentStock > 0) {
+      if (!formData.batchNumber || !formData.batchNumber.trim()) {
+        tempErrors.batchNumber = 'Batch Number is required when initial stock is > 0';
+      }
+      if (!formData.expiryDate) {
+        tempErrors.expiryDate = 'Expiry Date is required when initial stock is > 0';
+      } else {
+        const expDate = new Date(formData.expiryDate);
+        if (expDate <= new Date()) {
+          tempErrors.expiryDate = 'Expiry Date must be a future date';
+        }
+      }
     }
 
     if (formData.minimumStockLevel < 0) {
@@ -438,6 +453,43 @@ const AddMedicine = () => {
               />
               {errors.currentStock && <span className="field-error-msg">{errors.currentStock}</span>}
             </div>
+
+            {formData.currentStock > 0 && (
+              <>
+                <div className="form-group">
+                  <label>Batch Number<span className="required-star">*</span></label>
+                  <input
+                    type="text"
+                    name="batchNumber"
+                    placeholder="e.g. BATCH2026001"
+                    value={formData.batchNumber}
+                    onChange={handleChange}
+                  />
+                  {errors.batchNumber && <span className="field-error-msg">{errors.batchNumber}</span>}
+                </div>
+                
+                <div className="form-group">
+                  <label>Expiry Date<span className="required-star">*</span></label>
+                  <input
+                    type="date"
+                    name="expiryDate"
+                    value={formData.expiryDate}
+                    onChange={handleChange}
+                  />
+                  {errors.expiryDate && <span className="field-error-msg">{errors.expiryDate}</span>}
+                </div>
+
+                <div className="form-group">
+                  <label>Manufacturing Date (Optional)</label>
+                  <input
+                    type="date"
+                    name="manufacturingDate"
+                    value={formData.manufacturingDate}
+                    onChange={handleChange}
+                  />
+                </div>
+              </>
+            )}
 
             <div className="form-group">
               <label>Minimum stock level warning limit</label>
