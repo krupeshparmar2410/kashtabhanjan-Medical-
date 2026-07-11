@@ -10,6 +10,14 @@ const updateBatchStatuses = async () => {
   const today = new Date();
   const batches = await InventoryBatch.find({ isDeleted: false, status: { $ne: 'Sold Out' } });
   
+  // N+1 Optimization: fetch all needed medicines at once
+  const uniqueMedicineIds = [...new Set(batches.map(b => b.medicineId.toString()))];
+  const medicines = await Medicine.find({ _id: { $in: uniqueMedicineIds } });
+  const medicineMap = new Map();
+  medicines.forEach(med => medicineMap.set(med._id.toString(), med));
+
+  const bulkWriteOps = [];
+
   for (const batch of batches) {
     let statusChanged = false;
     let newStatus = batch.status;
@@ -27,7 +35,7 @@ const updateBatchStatuses = async () => {
         statusChanged = true;
       } else {
         const daysToExpiry = (expiryDate.getTime() - today.getTime()) / (1000 * 60 * 60 * 24);
-        const medicine = await Medicine.findById(batch.medicineId);
+        const medicine = medicineMap.get(batch.medicineId.toString());
         const limitDays = medicine ? (medicine.expiryAlertDays || 90) : 90;
         
         if (daysToExpiry <= limitDays && batch.status !== 'Near Expiry') {
@@ -43,8 +51,17 @@ const updateBatchStatuses = async () => {
     if (statusChanged) {
       batch.status = newStatus;
       batch.isSaleBlocked = isSaleBlocked;
-      await batch.save();
+      bulkWriteOps.push({
+        updateOne: {
+          filter: { _id: batch._id },
+          update: { $set: { status: newStatus, isSaleBlocked: isSaleBlocked } }
+        }
+      });
     }
+  }
+
+  if (bulkWriteOps.length > 0) {
+    await InventoryBatch.bulkWrite(bulkWriteOps);
   }
 };
 
@@ -531,40 +548,41 @@ const getReportingData = async (req, res) => {
     const today = new Date();
     
     // Low stock count (medicine level currentStock <= minimumStockLevel)
-    const lowStockCount = await Medicine.countDocuments({
-      isDeleted: false,
-      status: 'Active',
-      $expr: { $lte: ['$currentStock', '$minimumStockLevel'] }
-    });
-
-    // Near expiry batches count
-    const nearExpiryCount = await InventoryBatch.countDocuments({
-      isDeleted: false,
-      status: 'Near Expiry'
-    });
-
-    // Expired batches count
-    const expiredCount = await InventoryBatch.countDocuments({
-      isDeleted: false,
-      status: 'Expired'
-    });
-
-    // Detailed lists for tab view rendering
-    const lowStockList = await Medicine.find({
-      isDeleted: false,
-      status: 'Active',
-      $expr: { $lte: ['$currentStock', '$minimumStockLevel'] }
-    }).populate('agencyId', 'agencyName');
-
-    const nearExpiryList = await InventoryBatch.find({
-      isDeleted: false,
-      status: 'Near Expiry'
-    }).populate('medicineId');
-
-    const expiredList = await InventoryBatch.find({
-      isDeleted: false,
-      status: 'Expired'
-    }).populate('medicineId');
+    const [
+      lowStockCount,
+      nearExpiryCount,
+      expiredCount,
+      lowStockList,
+      nearExpiryList,
+      expiredList
+    ] = await Promise.all([
+      Medicine.countDocuments({
+        isDeleted: false,
+        status: 'Active',
+        $expr: { $lte: ['$currentStock', '$minimumStockLevel'] }
+      }),
+      InventoryBatch.countDocuments({
+        isDeleted: false,
+        status: 'Near Expiry'
+      }),
+      InventoryBatch.countDocuments({
+        isDeleted: false,
+        status: 'Expired'
+      }),
+      Medicine.find({
+        isDeleted: false,
+        status: 'Active',
+        $expr: { $lte: ['$currentStock', '$minimumStockLevel'] }
+      }).populate('agencyId', 'agencyName'),
+      InventoryBatch.find({
+        isDeleted: false,
+        status: 'Near Expiry'
+      }).populate('medicineId'),
+      InventoryBatch.find({
+        isDeleted: false,
+        status: 'Expired'
+      }).populate('medicineId')
+    ]);
 
     res.json({
       success: true,
