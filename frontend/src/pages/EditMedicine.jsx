@@ -94,7 +94,7 @@ const EditMedicine = () => {
             currentStock: med.currentStock || 0,
             unitType: med.unitType || 'Tablet',
             packSize: med.packSize || 1,
-            prescriptionRequired: med.prescriptionRequired || 'No',
+            prescriptionRequired: med.prescriptionRequired === true ? 'Yes' : 'No',
             storageType: med.storageType || 'Room Temperature',
             hsnCode: med.hsnCode || '',
             barcode: med.barcode || '',
