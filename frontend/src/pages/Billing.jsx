@@ -200,7 +200,7 @@ const Billing = () => {
           mrp: med.mrp,
           gstPercentage: med.gstPercentage || 12,
           discountPercentage: med.discountAllowed || 0,
-          prescriptionRequired: med.prescriptionRequired === 'Yes',
+          prescriptionRequired: Boolean(med.prescriptionRequired),
           scheduleH: med.scheduleH || false,
           scheduleH1: med.scheduleH1 || false,
           scheduleX: med.scheduleX || false,
