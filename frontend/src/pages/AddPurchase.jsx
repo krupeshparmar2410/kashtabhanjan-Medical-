@@ -185,6 +185,7 @@ const AddPurchase = () => {
     let gstSub = 0;
     let discSub = 0;
     let grandSub = 0;
+    let itemsChanged = false;
 
     const updatedItems = items.map(item => {
       const qty = parseFloat(item.quantity) || 0;
@@ -203,11 +204,20 @@ const AddPurchase = () => {
       gstSub += gstVal;
       grandSub += itemTotal;
 
+      const newLineTotal = Math.round(itemTotal * 100) / 100;
+      if (item.lineTotal !== newLineTotal) {
+        itemsChanged = true;
+      }
+
       return {
         ...item,
-        lineTotal: Math.round(itemTotal * 100) / 100
+        lineTotal: newLineTotal
       };
     });
+
+    if (itemsChanged) {
+      setItems(updatedItems);
+    }
 
     // We avoid infinite loop because calculateTotals is triggered only when items/paidAmount change, 
     // and we only update state if the rounded grand totals differ or on direct changes.
@@ -275,11 +285,11 @@ const AddPurchase = () => {
         alert(`Quantity must be greater than zero at line ${i + 1}`);
         return;
       }
-      if (!item.expiryDate || !item.manufacturingDate) {
-        alert(`Expiry and Manufacturing dates are required at line ${i + 1}`);
+      if (!item.expiryDate) {
+        alert(`Expiry date is required at line ${i + 1}`);
         return;
       }
-      if (new Date(item.expiryDate) <= new Date(item.manufacturingDate)) {
+      if (item.manufacturingDate && new Date(item.expiryDate) <= new Date(item.manufacturingDate)) {
         alert(`Expiry date must be greater than manufacturing date at line ${i + 1}`);
         return;
       }
@@ -291,6 +301,14 @@ const AddPurchase = () => {
 
     setLoading(true);
     try {
+      const payloadItems = items.map(item => {
+        const newItem = { ...item };
+        if (!newItem.manufacturingDate) {
+          newItem.manufacturingDate = null;
+        }
+        return newItem;
+      });
+
       const payload = {
         invoiceNumber,
         invoiceDate,
@@ -304,7 +322,7 @@ const AddPurchase = () => {
         creditDays,
         paymentMethod,
         remarks,
-        items
+        items: payloadItems
       };
 
       let res;
@@ -432,7 +450,6 @@ const AddPurchase = () => {
                         type="date" 
                         value={item.manufacturingDate}
                         onChange={(e) => handleItemFieldChange(index, 'manufacturingDate', e.target.value)}
-                        required
                       />
                     </td>
                     <td>
