@@ -24,7 +24,7 @@ const InventoryBatchSchema = new mongoose.Schema(
     },
     manufacturingDate: {
       type: Date,
-      required: [true, 'Manufacturing date is required']
+      required: false
     },
     expiryDate: {
       type: Date,
