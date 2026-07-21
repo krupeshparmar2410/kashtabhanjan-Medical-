@@ -26,7 +26,6 @@ const AddPurchase = () => {
     {
       medicineId: '',
       batchNumber: '',
-      manufacturingDate: '',
       expiryDate: '',
       quantity: '',
       freeQuantity: 0,
@@ -107,7 +106,6 @@ const AddPurchase = () => {
           const mappedItems = data.items.map(item => ({
             medicineId: item.medicineId._id || item.medicineId,
             batchNumber: item.batchNumber,
-            manufacturingDate: new Date(item.manufacturingDate).toISOString().split('T')[0],
             expiryDate: new Date(item.expiryDate).toISOString().split('T')[0],
             quantity: item.quantity,
             freeQuantity: item.freeQuantity,
@@ -238,7 +236,6 @@ const AddPurchase = () => {
       {
         medicineId: '',
         batchNumber: '',
-        manufacturingDate: '',
         expiryDate: '',
         quantity: '',
         freeQuantity: 0,
@@ -289,10 +286,6 @@ const AddPurchase = () => {
         alert(`Expiry date is required at line ${i + 1}`);
         return;
       }
-      if (item.manufacturingDate && new Date(item.expiryDate) <= new Date(item.manufacturingDate)) {
-        alert(`Expiry date must be greater than manufacturing date at line ${i + 1}`);
-        return;
-      }
       if (Number(item.sellingPrice) > Number(item.mrp)) {
         alert(`Selling price cannot exceed MRP at line ${i + 1}`);
         return;
@@ -303,9 +296,7 @@ const AddPurchase = () => {
     try {
       const payloadItems = items.map(item => {
         const newItem = { ...item };
-        if (!newItem.manufacturingDate) {
-          newItem.manufacturingDate = null;
-        }
+        delete newItem.manufacturingDate;
         return newItem;
       });
 
@@ -409,13 +400,13 @@ const AddPurchase = () => {
                 <tr>
                   <th style={{ width: '25%' }}>Medicine Name *</th>
                   <th style={{ width: '12%' }}>Batch No *</th>
-                  <th style={{ width: '10%' }}>Mfg Date *</th>
                   <th style={{ width: '10%' }}>Exp Date *</th>
                   <th style={{ width: '8%' }}>Qty *</th>
                   <th style={{ width: '6%' }}>Free Qty</th>
                   <th style={{ width: '8%' }}>Cost (₹) *</th>
                   <th style={{ width: '8%' }}>Selling (₹) *</th>
                   <th style={{ width: '8%' }}>MRP (₹) *</th>
+                  <th style={{ width: '6%' }}>DISCOUNT %</th>
                   <th style={{ width: '6%' }}>GST %</th>
                   <th style={{ width: '8%' }}>Total (₹)</th>
                   <th style={{ width: '4%' }}></th>
@@ -445,13 +436,7 @@ const AddPurchase = () => {
                         required
                       />
                     </td>
-                    <td>
-                      <input 
-                        type="date" 
-                        value={item.manufacturingDate}
-                        onChange={(e) => handleItemFieldChange(index, 'manufacturingDate', e.target.value)}
-                      />
-                    </td>
+
                     <td>
                       <input 
                         type="date" 
@@ -506,6 +491,15 @@ const AddPurchase = () => {
                         value={item.mrp}
                         onChange={(e) => handleItemFieldChange(index, 'mrp', parseFloat(e.target.value) || 0)}
                         required
+                      />
+                    </td>
+                    <td>
+                      <input 
+                        type="number" 
+                        min="0"
+                        max="100"
+                        value={item.discountPercentage}
+                        onChange={(e) => handleItemFieldChange(index, 'discountPercentage', parseFloat(e.target.value) || 0)}
                       />
                     </td>
                     <td>
