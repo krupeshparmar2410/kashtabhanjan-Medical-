@@ -35,7 +35,7 @@ const PurchaseItemSchema = new mongoose.Schema(
     quantity: {
       type: Number,
       required: [true, 'Quantity is required'],
-      min: [1, 'Quantity must be greater than zero']
+      min: [0.0001, 'Quantity must be greater than zero']
     },
     freeQuantity: {
       type: Number,

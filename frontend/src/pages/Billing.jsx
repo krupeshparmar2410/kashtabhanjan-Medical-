@@ -655,7 +655,8 @@ const Billing = () => {
                           <td style={{ padding: '10px' }}>
                             <input
                               type="number"
-                              min="1"
+                              min="0.01"
+                              step="0.01"
                               className="form-input"
                               style={{ padding: '6px', textAlign: 'center' }}
                               value={item.quantity}

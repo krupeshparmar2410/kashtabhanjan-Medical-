@@ -448,10 +448,11 @@ const AddPurchase = () => {
                     <td>
                       <input 
                         type="number" 
-                        min="1"
+                        min="0.01"
+                        step="0.01"
                         placeholder="Qty"
                         value={item.quantity}
-                        onChange={(e) => handleItemFieldChange(index, 'quantity', parseInt(e.target.value, 10))}
+                        onChange={(e) => handleItemFieldChange(index, 'quantity', parseFloat(e.target.value))}
                         required
                       />
                     </td>

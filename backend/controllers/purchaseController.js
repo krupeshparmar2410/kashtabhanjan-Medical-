@@ -1289,7 +1289,7 @@ const importPurchaseExcelCSV = async (req, res) => {
         return res.status(400).json({ success: false, message: `Medicine "${item.medicineName}" not found in system` });
       }
 
-      const qty = parseInt(item.quantity, 10) || 0;
+      const qty = parseFloat(item.quantity) || 0;
       const free = parseInt(item.freeQuantity, 10) || 0;
       const price = parseFloat(item.purchasePrice) || 0;
       const selling = parseFloat(item.sellingPrice) || price * 1.15; // default 15% markup if not provided
