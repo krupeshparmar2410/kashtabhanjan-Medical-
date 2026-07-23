@@ -460,8 +460,9 @@ const AddPurchase = () => {
                       <input 
                         type="number" 
                         min="0"
+                        step="0.01"
                         value={item.freeQuantity}
-                        onChange={(e) => handleItemFieldChange(index, 'freeQuantity', parseInt(e.target.value, 10) || 0)}
+                        onChange={(e) => handleItemFieldChange(index, 'freeQuantity', parseFloat(e.target.value) || 0)}
                       />
                     </td>
                     <td>

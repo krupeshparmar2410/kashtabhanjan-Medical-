@@ -1290,7 +1290,7 @@ const importPurchaseExcelCSV = async (req, res) => {
       }
 
       const qty = parseFloat(item.quantity) || 0;
-      const free = parseInt(item.freeQuantity, 10) || 0;
+      const free = parseFloat(item.freeQuantity) || 0;
       const price = parseFloat(item.purchasePrice) || 0;
       const selling = parseFloat(item.sellingPrice) || price * 1.15; // default 15% markup if not provided
       const mrpVal = parseFloat(item.mrp) || selling * 1.1; // default 10% markup over selling price if not provided
